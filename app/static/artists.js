@@ -44,18 +44,23 @@
     footer.textContent = 'Showing ' + artists.length + ' artists';
   }
 
-  async function load() {
+  async function load(opts) {
+    opts = opts || {};
     const params = new URLSearchParams();
     if (search.value.trim()) params.set('q', search.value.trim());
     if (filterSel.value) params.set('subscription', filterSel.value);
     params.set('sort', sortSel.value);
-    body.innerHTML = '<tr><td colspan="6" class="muted">Loading...</td></tr>';
+    // 'silent' loads (e.g. live updates during a scan) skip the placeholder and
+    // keep the scroll position so they don't disrupt the user.
+    if (!opts.silent) body.innerHTML = '<tr><td colspan="6" class="muted">Loading...</td></tr>';
+    const scrollY = window.scrollY;
     try {
       const data = await SMT.getJSON('/api/artists?' + params.toString());
       artists = data.artists;
       render();
+      if (opts.silent) window.scrollTo(0, scrollY);
     } catch (e) {
-      body.innerHTML = '<tr><td colspan="6" class="muted">Failed to load artists.</td></tr>';
+      if (!opts.silent) body.innerHTML = '<tr><td colspan="6" class="muted">Failed to load artists.</td></tr>';
     }
   }
 
@@ -180,15 +185,21 @@
   sortSel.addEventListener('change', load);
 
   // --- scan / refresh with progress polling ---
+  let scanTick = 0;
   function pollScan() {
     SMT.getJSON('/api/scan/status').then(function (s) {
       if (s.running) {
         progress.hidden = false;
-        progress.textContent = 'Scanning: ' + s.files_seen + ' files, ' +
-          s.artists_found + ' artists found. ' + (s.message || '');
+        progress.textContent = (s.mode === 'quick' ? 'Quick scan' : 'Full scan') +
+          ': ' + s.files_seen + ' files seen, ' + s.artists_found + ' artists. ' +
+          (s.message || '');
+        // Populate the list live so artists can be subscribed mid-scan.
+        scanTick++;
+        if (scanTick % 3 === 0) { load({ silent: true }); loadStats(); }
         setTimeout(pollScan, 1000);
       } else {
         progress.textContent = 'Scan finished: ' + (s.message || '');
+        scanTick = 0;
         load().then(loadStats);
         setTimeout(function () { progress.hidden = true; }, 4000);
       }
@@ -214,7 +225,15 @@
   document.getElementById('btn-scan').addEventListener('click', function () {
     SMT.postJSON('/api/scan', {}).then(function (r) {
       progress.hidden = false;
-      progress.textContent = r.error ? r.error : 'Scan started...';
+      progress.textContent = r.error ? r.error : 'Full scan started...';
+      if (!r.error) setTimeout(pollScan, 800);
+    });
+  });
+
+  document.getElementById('btn-quick-scan').addEventListener('click', function () {
+    SMT.postJSON('/api/scan', { quick: true }).then(function (r) {
+      progress.hidden = false;
+      progress.textContent = r.error ? r.error : 'Quick scan started...';
       if (!r.error) setTimeout(pollScan, 800);
     });
   });

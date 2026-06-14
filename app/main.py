@@ -561,12 +561,15 @@ def api_upcoming():
 
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
+    """Start a library scan. Body: {"quick": true} for an incremental sync."""
     directory = db.get_setting("music_directory")
+    payload = request.get_json(silent=True) or {}
+    quick = bool(payload.get("quick"))
     state = scanner.get_scan_state()
     if state.get("running"):
         return jsonify({"error": "scan already running", "state": state}), 409
-    scanner.scan_in_background(directory)
-    return jsonify({"started": True, "directory": directory})
+    scanner.scan_in_background(directory, quick=quick)
+    return jsonify({"started": True, "directory": directory, "quick": quick})
 
 
 @app.route("/api/scan/status")

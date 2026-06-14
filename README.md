@@ -13,6 +13,11 @@ a PWA with a mobile-friendly UI.
 
 - **Library scan** reads artist tags from your music files (mp3, flac, m4a, ogg,
   opus, wav, and more) and builds a de-duplicated artist list with track counts.
+  Artists are written to the database **in batches as they're found**, so they
+  show up in the list (and can be subscribed to) while the scan is still running.
+- **Quick scan** for fast re-syncs after the first full scan: it only reads files
+  added or changed since the last scan, so dropping in a few new albums syncs
+  almost instantly instead of re-reading the whole library.
 - **Fast subscribe/unsubscribe** via a filterable table of checkboxes — built for
   thousands of artists. Bulk-select rows to subscribe or unsubscribe in one go.
 - **Ignore artists** to hide ones you don't care about (e.g. an act that no longer
@@ -132,7 +137,9 @@ The SQLite database is stored in the `/data` volume so it survives restarts.
    - Add a **MusicBrainz contact** (email or URL). MusicBrainz etiquette asks for a
      contact in the request User-Agent.
    - Optionally configure the **webhook** for Notify subscriptions.
-2. On the **Artists** page, click **Scan library**. Progress shows live.
+2. On the **Artists** page, click **Full scan**. Progress shows live and artists
+   appear in the list as they're discovered. Later, when you add music, use
+   **Quick scan** to pick up just the new files.
 3. Subscribe to artists (checkboxes). Subscribing triggers an immediate metadata
    fetch; after that, a background job re-checks on the configured interval.
 
@@ -195,7 +202,7 @@ Use **Send test webhook** on the Settings page to verify your endpoint.
 | POST | `/api/artists/<id>/refresh` | Re-fetch one artist's info/releases now. |
 | GET  | `/api/subscriptions` | All followed artists. |
 | GET  | `/api/upcoming` | Upcoming releases. Param `window`: `day`, `week`, `next-week`, `month`, `all`. |
-| POST | `/api/scan` | Start a library scan. |
+| POST | `/api/scan` | Start a library scan. Body `{"quick": true}` for an incremental sync of only added/changed files. |
 | GET  | `/api/scan/status` | Scan progress. |
 | POST | `/api/refresh` | Refresh all followed artists. |
 | GET  | `/api/refresh/status` | Refresh progress. |
