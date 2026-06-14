@@ -5,11 +5,13 @@
 <h1>Artists</h1>
 
 <div class="stats" id="stats">
-  <span data-stat="artists">-</span> artists
+  <span data-stat="visible">-</span> artists
   <span class="sep">/</span>
   <span data-stat="following">-</span> following
   <span class="sep">/</span>
   <span data-stat="upcoming_month">-</span> upcoming this month
+  <span class="sep">/</span>
+  <a href="{{ url_for('ignored_page') }}"><span data-stat="ignored">-</span> ignored</a>
 </div>
 
 <div class="toolbar">
@@ -47,6 +49,7 @@
   <button type="button" data-bulk="subscribed">Subscribe</button>
   <button type="button" data-bulk="notify">Subscribe + Notify</button>
   <button type="button" data-bulk="none">Unsubscribe</button>
+  <button type="button" id="bulk-ignore">Ignore</button>
   <button type="button" id="bulk-clear">Clear selection</button>
 </div>
 
@@ -58,10 +61,11 @@
       <th class="col-tracks">Tracks</th>
       <th class="col-sub" title="Show on Following page">Sub</th>
       <th class="col-notify" title="Subscribe and trigger webhook on new release">Notify</th>
+      <th class="col-ignore" title="Hide from this list">Ignore</th>
     </tr>
   </thead>
   <tbody id="artists-body">
-    <tr><td colspan="5" class="muted">Loading...</td></tr>
+    <tr><td colspan="6" class="muted">Loading...</td></tr>
   </tbody>
 </table>
 

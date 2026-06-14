@@ -152,10 +152,14 @@ button:hover { border-color: var(--fg); }
 }
 .artists-table tbody tr:hover { background: var(--row-hover); }
 .col-check, .col-sub, .col-notify { width: 3rem; text-align: center; }
+.col-ignore { width: 4.5rem; text-align: center; }
 .col-tracks { width: 5rem; text-align: right; }
 .artists-table td.col-check,
 .artists-table td.col-sub,
-.artists-table td.col-notify { text-align: center; }
+.artists-table td.col-notify,
+.artists-table td.col-ignore { text-align: center; }
+.ignore-btn { padding: 0.1rem 0.4rem; font-size: 0.8rem; color: var(--muted); }
+.ignore-btn:hover { color: var(--fg); }
 .artists-table td.col-tracks { text-align: right; color: var(--muted); }
 input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
 

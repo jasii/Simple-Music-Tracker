@@ -28,13 +28,15 @@
         (subChecked ? ' checked' : '') + '></td>' +
       '<td class="col-notify"><input type="checkbox" class="notify-toggle"' +
         (notifyChecked ? ' checked' : '') + '></td>' +
+      '<td class="col-ignore"><button type="button" class="ignore-btn" ' +
+        'title="Hide this artist">Ignore</button></td>' +
       '</tr>'
     );
   }
 
   function render() {
     if (!artists.length) {
-      body.innerHTML = '<tr><td colspan="5" class="muted">No artists. Run a library scan from the toolbar.</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" class="muted">No artists. Run a library scan from the toolbar.</td></tr>';
       footer.textContent = '';
       return;
     }
@@ -47,13 +49,13 @@
     if (search.value.trim()) params.set('q', search.value.trim());
     if (filterSel.value) params.set('subscription', filterSel.value);
     params.set('sort', sortSel.value);
-    body.innerHTML = '<tr><td colspan="5" class="muted">Loading...</td></tr>';
+    body.innerHTML = '<tr><td colspan="6" class="muted">Loading...</td></tr>';
     try {
       const data = await SMT.getJSON('/api/artists?' + params.toString());
       artists = data.artists;
       render();
     } catch (e) {
-      body.innerHTML = '<tr><td colspan="5" class="muted">Failed to load artists.</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" class="muted">Failed to load artists.</td></tr>';
     }
   }
 
@@ -106,6 +108,20 @@
     }
   });
 
+  // Ignore a single artist: hide it from the list right away.
+  body.addEventListener('click', function (e) {
+    if (!e.target.classList.contains('ignore-btn')) return;
+    const tr = e.target.closest('tr');
+    const id = parseInt(tr.getAttribute('data-id'), 10);
+    SMT.postJSON('/api/artists/' + id + '/ignore', { ignored: true }).then(function () {
+      artists = artists.filter(function (x) { return x.id !== id; });
+      selected.delete(id);
+      updateBulkBar();
+      render();
+      loadStats();
+    });
+  });
+
   // --- selection / bulk ---
   function updateBulkBar() {
     if (selected.size) {
@@ -132,6 +148,16 @@
       selectAll.checked = false;
       body.querySelectorAll('.row-select').forEach(function (cb) { cb.checked = false; });
       updateBulkBar();
+      return;
+    }
+    if (e.target.id === 'bulk-ignore') {
+      const ids = Array.from(selected);
+      SMT.postJSON('/api/artists/ignore', { ids: ids, ignored: true }).then(function () {
+        selected.clear();
+        selectAll.checked = false;
+        updateBulkBar();
+        load().then(loadStats);
+      });
       return;
     }
     if (!state) return;
