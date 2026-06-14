@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Discover - Simple Music Tracker{% endblock %}
+
+{% block content %}
+<h1>Discover</h1>
+<p class="muted">Find new music to track that may not be in your library yet.</p>
+
+<section class="discover-section">
+  <div class="discover-head">
+    <h2>Last.fm &mdash; Coming Soon (Recommended)</h2>
+    <button id="lastfm-refresh" type="button">Refresh</button>
+  </div>
+  <p class="muted" id="lastfm-status"></p>
+  <div id="lastfm-releases" class="discover-grid">
+    <p class="muted">Loading...</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='discover.js') }}"></script>
+{% endblock %}

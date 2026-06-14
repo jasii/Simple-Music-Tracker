@@ -15,7 +15,7 @@ from flask import (
     url_for,
 )
 
-from . import db, musicbrainz, scanner, scheduler, tracker, webhooks
+from . import db, lastfm, lastfm_scrape, musicbrainz, scanner, scheduler, tracker, webhooks
 
 app = Flask(__name__)
 
@@ -107,6 +107,7 @@ PAGE_DEFS = {
     "artists": ("artists_page", "Artists"),
     "following": ("subscriptions_page", "Following"),
     "upcoming": ("upcoming_page", "Upcoming"),
+    "discover": ("discover_page", "Discover"),
     "ignored": ("ignored_page", "Ignored"),
     "settings": ("settings_page", "Settings"),
 }
@@ -169,6 +170,11 @@ def subscriptions_page():
 @app.route("/upcoming")
 def upcoming_page():
     return render_template("upcoming.html", **_base_context(active="upcoming"))
+
+
+@app.route("/discover")
+def discover_page():
+    return render_template("discover.html", **_base_context(active="discover"))
 
 
 @app.route("/ignored")
@@ -560,6 +566,95 @@ def api_discography(artist_id):
                     "counts": {k: len(v) for k, v in groups.items()}})
 
 
+@app.route("/api/artists/track-by-name", methods=["POST"])
+def api_track_by_name():
+    """Start monitoring an artist by name (used by the Discover page).
+
+    Body: {"name": "Artist", "state": "subscribed|notify"}. Creates the artist
+    if it isn't already in the library, then queues a metadata fetch (which
+    resolves the MusicBrainz id from the name).
+    """
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()
+    state = payload.get("state") or "subscribed"
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    if state not in ("subscribed", "notify"):
+        state = "subscribed"
+
+    monitor_types = db.normalize_monitor_types(db.get_setting("default_monitor_types"))
+    with db._write_lock:
+        conn = db.get_connection()
+        try:
+            existing = conn.execute(
+                "SELECT id FROM artists WHERE sort_name = ?", (name.lower(),)
+            ).fetchone()
+            if existing:
+                artist_id = existing["id"]
+                conn.execute(
+                    "UPDATE artists SET subscription = ?, ignored = 0 WHERE id = ?",
+                    (state, artist_id),
+                )
+                created = False
+            else:
+                cur = conn.execute(
+                    "INSERT INTO artists (name, sort_name, subscription, "
+                    "monitor_types, track_count) VALUES (?, ?, ?, ?, 0)",
+                    (name, name.lower(), state, monitor_types),
+                )
+                artist_id = cur.lastrowid
+                created = True
+            conn.commit()
+        finally:
+            conn.close()
+
+    tracker.enqueue_artist(artist_id)
+    return jsonify({"id": artist_id, "name": name, "subscription": state, "created": created})
+
+
+@app.route("/api/discover/lastfm")
+def api_discover_lastfm():
+    """Scraped Last.fm 'coming soon / recommended' releases. ?refresh=1 re-fetches."""
+    if not (db.get_setting("lastfm_cookie") or "").strip():
+        return jsonify({
+            "configured": False,
+            "items": [],
+            "error": "Add your Last.fm session cookie in Settings to use this.",
+        })
+    force = request.args.get("refresh") == "1"
+    try:
+        items, cached = lastfm_scrape.fetch_coming_soon(force=force)
+    except Exception as exc:  # noqa: BLE001 - surface fetch/parse problems
+        return jsonify({"configured": True, "items": [], "error": str(exc)}), 502
+
+    # Flag which artists are already in the library / followed.
+    names = {(it.get("artist") or "").lower() for it in items if it.get("artist")}
+    known = {}
+    if names:
+        conn = db.get_connection()
+        try:
+            placeholders = ",".join("?" for _ in names)
+            rows = conn.execute(
+                f"SELECT sort_name, subscription FROM artists "
+                f"WHERE sort_name IN ({placeholders})",
+                list(names),
+            ).fetchall()
+            known = {r["sort_name"]: r["subscription"] for r in rows}
+        finally:
+            conn.close()
+    for it in items:
+        sub = known.get((it.get("artist") or "").lower())
+        it["in_library"] = sub is not None
+        it["following"] = sub in ("subscribed", "notify")
+
+    return jsonify({
+        "configured": True,
+        "cached": cached,
+        "count": len(items),
+        "items": items,
+    })
+
+
 @app.route("/api/artists/add", methods=["POST"])
 def api_add_artist():
     """Start monitoring an artist from a pasted MusicBrainz link (or raw MBID).
@@ -887,6 +982,11 @@ def api_settings():
             value = ",".join(normalize_nav_order(value))
         elif key == "prefer_album_artist":
             value = "true" if str(value).lower() in ("true", "1", "on", "yes") else "false"
+        elif key == "discover_refresh_hours":
+            try:
+                value = str(max(int(float(value)), 1))
+            except (TypeError, ValueError):
+                value = "24"
         elif key == "musicbrainz_rate_limit_ms":
             # Clamp to >= 1000ms so we never undercut MusicBrainz's 1 req/sec.
             try:
@@ -901,6 +1001,18 @@ def api_settings():
 @app.route("/api/webhook/test", methods=["POST"])
 def api_webhook_test():
     ok, message = webhooks.send_test()
+    return jsonify({"ok": ok, "message": message})
+
+
+@app.route("/api/health/lastfm-key", methods=["GET", "POST"])
+def api_health_lastfm_key():
+    ok, message = lastfm.check_api_key()
+    return jsonify({"ok": ok, "message": message})
+
+
+@app.route("/api/health/lastfm-cookie", methods=["GET", "POST"])
+def api_health_lastfm_cookie():
+    ok, message = lastfm_scrape.check_cookie()
     return jsonify({"ok": ok, "message": message})
 
 

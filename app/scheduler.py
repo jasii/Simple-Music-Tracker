@@ -1,41 +1,54 @@
-"""Background scheduler that periodically refreshes subscribed artists.
+"""Background scheduler for periodic refreshes.
 
-A single daemon thread sleeps for the configured interval and then refreshes
-all subscribed artists. Kept deliberately simple (no external scheduler
-dependency) -- the interval is re-read from settings on every cycle so changes
-take effect without a restart.
+A single daemon thread wakes once a minute and runs two independent timers,
+re-read from settings each tick so changes take effect without a restart:
+- refreshing all subscribed artists (check_interval_hours), and
+- re-scraping the Discover sources (discover_refresh_hours, e.g. once a day).
 """
 
 import threading
 import time
 
-from . import db, tracker
+from . import db, lastfm_scrape, tracker
 
 _thread = None
 _started = False
 
 
+def _hours(setting, default, floor):
+    try:
+        return max(float(db.get_setting(setting) or default), floor)
+    except (TypeError, ValueError):
+        return default
+
+
 def _loop():
     # Small initial delay so the web server is up before the first heavy cycle.
     time.sleep(30)
+    last_artist = 0.0
+    # Don't scrape Discover the instant we boot; the page fills it on demand and
+    # the scheduler keeps it fresh on the configured cadence after that.
+    last_discover = time.time()
+
     while True:
-        try:
-            interval_hours = float(db.get_setting("check_interval_hours") or 12)
-        except (TypeError, ValueError):
-            interval_hours = 12
-        interval_hours = max(interval_hours, 0.25)  # floor at 15 minutes
+        now = time.time()
 
-        try:
-            # Hand work to the single refresh worker; it paces external calls.
-            tracker.enqueue_all_subscribed()
-        except Exception:  # noqa: BLE001 - never let the scheduler thread die
-            pass
+        if now - last_artist >= _hours("check_interval_hours", 12, 0.25) * 3600:
+            last_artist = now
+            try:
+                tracker.enqueue_all_subscribed()
+            except Exception:  # noqa: BLE001 - never let the scheduler thread die
+                pass
 
-        # Sleep in short chunks so interval changes are picked up reasonably fast.
-        remaining = interval_hours * 3600
-        while remaining > 0:
-            time.sleep(min(60, remaining))
-            remaining -= 60
+        if (db.get_setting("lastfm_cookie") or "").strip():
+            if now - last_discover >= _hours("discover_refresh_hours", 24, 1) * 3600:
+                last_discover = now
+                try:
+                    lastfm_scrape.fetch_coming_soon(force=True)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        time.sleep(60)
 
 
 def start():

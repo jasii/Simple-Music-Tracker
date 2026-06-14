@@ -25,7 +25,26 @@
     <label for="lastfm_api_key">Last.fm API key</label>
     <input type="text" id="lastfm_api_key" name="lastfm_api_key"
            value="{{ settings.lastfm_api_key }}" autocomplete="off">
-    <p class="hint">Used for artist bios and images. Get one at last.fm/api.</p>
+    <p class="hint">Used for artist bios and images. Get one at last.fm/api.
+      <button type="button" id="btn-test-key">Test key</button>
+      <span id="key-result" class="muted"></span></p>
+
+    <label for="lastfm_cookie">Last.fm session cookie (for Discover)</label>
+    <textarea id="lastfm_cookie" name="lastfm_cookie" rows="2"
+              autocomplete="off" placeholder="sessionid=...; csrftoken=...">{{ settings.lastfm_cookie }}</textarea>
+    <p class="hint">The Discover page scrapes your personalised Last.fm "coming soon" releases,
+      which require a login. Log in at last.fm in your browser, open developer tools &rarr;
+      Application/Storage &rarr; Cookies &rarr; <code>https://www.last.fm</code>, and paste the
+      cookies here (at minimum the <code>sessionid</code> value as <code>sessionid=VALUE</code>).
+      Kept only in your local database.
+      <button type="button" id="btn-test-cookie">Test cookie</button>
+      <span id="cookie-result" class="muted"></span></p>
+
+    <label for="discover_refresh_hours">Discover refresh interval (hours)</label>
+    <input type="number" id="discover_refresh_hours" name="discover_refresh_hours"
+           min="1" step="1" value="{{ settings.discover_refresh_hours }}">
+    <p class="hint">How often the Discover scrape is refreshed in the background (default 24 = once a day).
+      The Refresh button on the Discover page forces an immediate update.</p>
 
     <label for="musicbrainz_contact">MusicBrainz contact (email or URL)</label>
     <input type="text" id="musicbrainz_contact" name="musicbrainz_contact"

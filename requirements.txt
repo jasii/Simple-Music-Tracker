@@ -4,5 +4,7 @@ Flask==3.0.3
 requests==2.32.3
 # Audio tag reading for the library scanner.
 mutagen==1.47.0
+# HTML parsing for scraping discovery pages (e.g. Last.fm coming-soon releases).
+beautifulsoup4==4.12.3
 # Production WSGI server.
 gunicorn==22.0.0
