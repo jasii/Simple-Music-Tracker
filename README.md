@@ -15,6 +15,10 @@ a PWA with a mobile-friendly UI.
   opus, wav, and more) and builds a de-duplicated artist list with track counts.
 - **Fast subscribe/unsubscribe** via a filterable table of checkboxes — built for
   thousands of artists. Bulk-select rows to subscribe or unsubscribe in one go.
+- **Ignore artists** to hide ones you don't care about (e.g. an act that no longer
+  releases music) from the main library list. Ignored artists are parked on a
+  separate **Ignored** page where you can un-ignore them at any time, so nothing
+  is ever lost.
 - **Two subscription levels** per artist:
   - *Subscribe* — the artist shows on your Following page and their releases are
     tracked.
@@ -179,11 +183,14 @@ Use **Send test webhook** on the Settings page to verify your endpoint.
 | Method | Endpoint | Description |
 | ------ | -------- | ----------- |
 | GET  | `/api/stats` | Library counts and upcoming totals. |
-| GET  | `/api/artists` | List artists. Params: `q`, `subscription` (`none\|subscribed\|notify\|following`), `sort` (`name\|tracks\|recent`), `limit`, `offset`. |
+| GET  | `/api/artists` | List artists. Params: `q`, `subscription` (`none\|subscribed\|notify\|following`), `ignored` (`0` hide ignored — default, `1` only ignored, `all`), `sort` (`name\|tracks\|recent`), `limit`, `offset`. |
 | GET  | `/api/artists/<id>` | Artist detail with tracked releases. |
 | POST | `/api/artists/<id>/subscription` | Body `{"state": "none\|subscribed\|notify"}`. |
 | POST | `/api/artists/add` | Monitor an artist from a MusicBrainz link/ID. Body `{"link": "https://musicbrainz.org/artist/<mbid>", "state": "subscribed\|notify", "types": ["album","ep","single"]}`. Creates the artist if not in the library. |
 | POST | `/api/artists/<id>/monitor-types` | Set watched release types. Body `{"types": ["album","ep","single"]}` (non-empty subset). |
+| POST | `/api/artists/<id>/ignore` | Hide/unhide an artist. Body `{"ignored": true\|false}`. |
+| POST | `/api/artists/ignore` | Bulk hide/unhide. Body `{"ids": [...], "ignored": true\|false}`. |
+| GET  | `/api/ignored` | List ignored artists. |
 | POST | `/api/artists/subscriptions` | Bulk: `{"ids": [...], "state": "..."}`. |
 | POST | `/api/artists/<id>/refresh` | Re-fetch one artist's info/releases now. |
 | GET  | `/api/subscriptions` | All followed artists. |

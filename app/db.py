@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS artists (
     subscription  TEXT NOT NULL DEFAULT 'none',
     -- comma separated subset of 'album,ep,single' to watch for this artist
     monitor_types TEXT NOT NULL DEFAULT 'album,ep',
+    -- 1 = hidden from the main library list (artist parked in the Ignored area)
+    ignored       INTEGER NOT NULL DEFAULT 0,
     track_count   INTEGER NOT NULL DEFAULT 0,
     last_checked  TEXT,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -96,6 +98,15 @@ def _migrate(conn):
             "ALTER TABLE artists ADD COLUMN monitor_types TEXT NOT NULL "
             "DEFAULT 'album,ep'"
         )
+    if "ignored" not in cols:
+        conn.execute(
+            "ALTER TABLE artists ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0"
+        )
+    # Index created here (not in SCHEMA) so it runs after the column exists on
+    # databases created before the column was added.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_artists_ignored ON artists (ignored)"
+    )
 
 
 def normalize_monitor_types(value):

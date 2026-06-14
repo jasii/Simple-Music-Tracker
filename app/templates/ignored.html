@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Ignored - Simple Music Tracker{% endblock %}
+
+{% block content %}
+<h1>Ignored Artists</h1>
+<p class="muted">Artists hidden from your library list (e.g. they no longer release music).
+  They are kept here so you can bring them back any time.</p>
+
+<div class="toolbar">
+  <input type="search" id="ignored-search" placeholder="Filter ignored..." autocomplete="off">
+  <button id="btn-unignore-all" type="button">Unignore all shown</button>
+</div>
+
+<div id="ignored-list" class="card-list">
+  <p class="muted">Loading...</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='ignored.js') }}"></script>
+{% endblock %}

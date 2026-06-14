@@ -115,6 +115,11 @@ def upcoming_page():
     return render_template("upcoming.html", **_base_context(active="upcoming"))
 
 
+@app.route("/ignored")
+def ignored_page():
+    return render_template("ignored.html", **_base_context(active="ignored"))
+
+
 @app.route("/artist/<int:artist_id>")
 def artist_page(artist_id):
     conn = db.get_connection()
@@ -153,6 +158,9 @@ def api_stats():
     conn = db.get_connection()
     try:
         total = conn.execute("SELECT COUNT(*) c FROM artists").fetchone()["c"]
+        ignored = conn.execute(
+            "SELECT COUNT(*) c FROM artists WHERE ignored = 1"
+        ).fetchone()["c"]
         subscribed = conn.execute(
             "SELECT COUNT(*) c FROM artists WHERE subscription = 'subscribed'"
         ).fetchone()["c"]
@@ -165,6 +173,8 @@ def api_stats():
     return jsonify(
         {
             "artists": total,
+            "visible": total - ignored,
+            "ignored": ignored,
             "subscribed": subscribed,
             "notify": notify,
             "following": subscribed + notify,
@@ -185,6 +195,8 @@ def api_artists():
     q = (request.args.get("q") or "").strip().lower()
     subscription = request.args.get("subscription") or ""
     sort = request.args.get("sort") or "name"
+    # 'ignored': "0" (default, hide ignored), "1" (only ignored), "all" (both).
+    ignored = request.args.get("ignored", "0")
     try:
         limit = min(int(request.args.get("limit", 5000)), 10000)
     except ValueError:
@@ -204,6 +216,10 @@ def api_artists():
     elif subscription in VALID_STATES:
         where.append("subscription = ?")
         params.append(subscription)
+    if ignored == "1":
+        where.append("ignored = 1")
+    elif ignored != "all":
+        where.append("ignored = 0")
 
     order = {
         "tracks": "track_count DESC, sort_name",
@@ -427,6 +443,66 @@ def api_bulk_subscription():
             tracker.enqueue_artist(artist_id)
 
     return jsonify({"updated": len(ids), "state": state})
+
+
+@app.route("/api/artists/<int:artist_id>/ignore", methods=["POST"])
+def api_set_ignore(artist_id):
+    """Hide or unhide an artist from the main library list.
+
+    Body: {"ignored": true|false}. Ignored artists move to the Ignored area and
+    no longer appear in the default Artists listing.
+    """
+    payload = request.get_json(silent=True) or {}
+    ignored = 1 if payload.get("ignored", True) else 0
+
+    with db._write_lock:
+        conn = db.get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE artists SET ignored = ? WHERE id = ?", (ignored, artist_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        if cur.rowcount == 0:
+            return jsonify({"error": "artist not found"}), 404
+
+    return jsonify({"id": artist_id, "ignored": bool(ignored)})
+
+
+@app.route("/api/artists/ignore", methods=["POST"])
+def api_bulk_ignore():
+    """Bulk hide/unhide artists. Body: {"ids": [..], "ignored": true|false}."""
+    payload = request.get_json(silent=True) or {}
+    ids = [int(i) for i in (payload.get("ids") or []) if str(i).isdigit()]
+    ignored = 1 if payload.get("ignored", True) else 0
+    if not ids:
+        return jsonify({"error": "no ids"}), 400
+
+    placeholders = ",".join("?" for _ in ids)
+    with db._write_lock:
+        conn = db.get_connection()
+        try:
+            conn.execute(
+                f"UPDATE artists SET ignored = ? WHERE id IN ({placeholders})",
+                [ignored, *ids],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return jsonify({"updated": len(ids), "ignored": bool(ignored)})
+
+
+@app.route("/api/ignored")
+def api_ignored():
+    conn = db.get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM artists WHERE ignored = 1 ORDER BY sort_name"
+        ).fetchall()
+    finally:
+        conn.close()
+    return jsonify({"artists": [_row_to_dict(r) for r in rows]})
 
 
 @app.route("/api/subscriptions")
