@@ -21,13 +21,11 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="{{ url_for('index') }}">Simple Music Tracker</a>
+    <a class="brand" href="{{ url_for('home') }}">Simple Music Tracker</a>
     <nav class="nav">
-      <a href="{{ url_for('index') }}" class="{{ 'on' if active == 'artists' }}">Artists</a>
-      <a href="{{ url_for('subscriptions_page') }}" class="{{ 'on' if active == 'subscriptions' }}">Following</a>
-      <a href="{{ url_for('upcoming_page') }}" class="{{ 'on' if active == 'upcoming' }}">Upcoming</a>
-      <a href="{{ url_for('ignored_page') }}" class="{{ 'on' if active == 'ignored' }}">Ignored</a>
-      <a href="{{ url_for('settings_page') }}" class="{{ 'on' if active == 'settings' }}">Settings</a>
+      {% for item in nav_items %}
+      <a href="{{ url_for(item.endpoint) }}" class="{{ 'on' if active == item.key }}">{{ item.label }}</a>
+      {% endfor %}
       <button id="theme-toggle" type="button" class="theme-toggle" title="Toggle theme">theme</button>
     </nav>
   </header>

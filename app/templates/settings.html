@@ -94,6 +94,27 @@
   </fieldset>
 
   <fieldset>
+    <legend>Navigation &amp; home page</legend>
+    <p class="hint">Reorder the tabs with Up/Down, and pick which page opens by default (the home page).</p>
+    <input type="hidden" name="nav_order" id="nav_order" value="{{ settings.nav_order }}">
+    <ul class="nav-order" id="nav-order-list">
+      {% for item in nav_items %}
+      <li data-key="{{ item.key }}">
+        <label class="nav-home" title="Set as home page">
+          <input type="radio" name="home_page" value="{{ item.key }}"
+            {{ 'checked' if settings.home_page == item.key }}> home
+        </label>
+        <span class="nav-label">{{ item.label }}</span>
+        <span class="nav-order-buttons">
+          <button type="button" class="nav-up" title="Move up">Up</button>
+          <button type="button" class="nav-down" title="Move down">Down</button>
+        </span>
+      </li>
+      {% endfor %}
+    </ul>
+  </fieldset>
+
+  <fieldset>
     <legend>Appearance</legend>
     <label for="default_theme">Default theme</label>
     <select id="default_theme" name="default_theme">

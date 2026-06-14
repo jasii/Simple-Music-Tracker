@@ -85,6 +85,8 @@ DEFAULT_SETTINGS = {
     "default_monitor_types": "album,ep",   # applied to newly followed artists
     "musicbrainz_rate_limit_ms": "1000",   # min gap between MusicBrainz requests (matches aurral)
     "discography_autohide": "",             # categories collapsed by default on artist pages
+    "home_page": "upcoming",                # which page '/' opens (Upcoming on first run)
+    "nav_order": "artists,following,upcoming,ignored,settings",
 }
 
 # Release types that may be monitored. Order is the display order.
