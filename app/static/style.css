@@ -212,6 +212,22 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
 .monitor-types { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; margin: 0.4rem 0; }
 .monitor-types label { display: inline-flex; align-items: center; gap: 0.3rem; }
 
+/* Artist tools (match / merge) */
+.tools { border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem 0.8rem; margin: 1rem 0; }
+.tools summary { cursor: pointer; font-weight: 600; }
+.tool-block { margin: 0.8rem 0; }
+.tool-block label { display: block; font-weight: 600; margin-bottom: 0.3rem; }
+.tool-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.tool-row input[type="text"], .tool-row input[type="search"] { flex: 1 1 18rem; }
+.merge-matches { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.5rem; }
+.merge-pick { text-align: left; }
+
+/* Discography categories */
+.disco-cat { margin-bottom: 1rem; }
+.disco-head { display: flex; align-items: center; gap: 0.5rem; border-bottom: 1px solid var(--line); padding-bottom: 0.2rem; }
+.disco-head .toggle-cat { margin-left: auto; padding: 0.1rem 0.5rem; font-size: 0.8rem; }
+.disco-items { margin-top: 0.5rem; }
+
 /* Tabs */
 .tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.8rem 0; }
 .tabs button.on { font-weight: 700; border-color: var(--fg); }

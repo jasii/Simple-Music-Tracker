@@ -11,8 +11,9 @@
     new FormData(form).forEach(function (value, key) {
       data[key] = key in data ? data[key] + ',' + value : value;
     });
-    // Ensure the checkbox group is always sent, even when fully unchecked.
+    // Ensure checkbox groups are always sent, even when fully unchecked.
     if (!('default_monitor_types' in data)) data.default_monitor_types = '';
+    if (!('discography_autohide' in data)) data.discography_autohide = '';
     return data;
   }
 

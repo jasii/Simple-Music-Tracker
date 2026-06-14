@@ -54,6 +54,21 @@
   </fieldset>
 
   <fieldset>
+    <legend>Discography display</legend>
+    {% set autohidden = (settings.discography_autohide or '').split(',') %}
+    <label>Auto-hide these categories on artist pages</label>
+    <div class="monitor-types">
+      <label><input type="checkbox" name="discography_autohide" value="album"
+        {{ 'checked' if 'album' in autohidden }}> Albums</label>
+      <label><input type="checkbox" name="discography_autohide" value="ep"
+        {{ 'checked' if 'ep' in autohidden }}> EPs</label>
+      <label><input type="checkbox" name="discography_autohide" value="single"
+        {{ 'checked' if 'single' in autohidden }}> Singles</label>
+    </div>
+    <p class="hint">Collapsed by default when you open an artist; you can still expand them per page.</p>
+  </fieldset>
+
+  <fieldset>
     <legend>Webhook (for "Notify" subscriptions)</legend>
     <label for="webhook_url">Webhook URL</label>
     <input type="text" id="webhook_url" name="webhook_url"
