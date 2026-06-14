@@ -13,8 +13,12 @@ a PWA with a mobile-friendly UI.
 
 - **Library scan** reads artist tags from your music files (mp3, flac, m4a, ogg,
   opus, wav, and more) and builds a de-duplicated artist list with track counts.
-  Artists are written to the database **in batches as they're found**, so they
-  show up in the list (and can be subscribed to) while the scan is still running.
+  It prefers each file's **album artist** tag (falling back to the track artist;
+  toggleable in Settings). Artists are written to the database **in batches as
+  they're found**, so they show up in the list (and can be subscribed to) while
+  the scan is still running.
+- **Backup & restore** your settings and data as a JSON file from the Settings
+  page (or via the API), and import it to move or recover your setup.
 - **Quick scan** for fast re-syncs after the first full scan: it only reads files
   added or changed since the last scan, so dropping in a few new albums syncs
   almost instantly instead of re-reading the whole library.
@@ -226,6 +230,8 @@ Use **Send test webhook** on the Settings page to verify your endpoint.
 | POST | `/api/refresh` | Refresh all followed artists. |
 | GET  | `/api/refresh/status` | Refresh progress. |
 | GET/POST | `/api/settings` | Read or update settings. |
+| GET  | `/api/backup` | Download a JSON backup of settings, artists and releases. |
+| POST | `/api/import` | Restore from a backup (multipart `file` or JSON body). Replaces all data. |
 | POST | `/api/webhook/test` | Fire a sample webhook. |
 | GET  | `/api/health` | Health check. |
 

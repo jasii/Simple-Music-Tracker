@@ -1,5 +1,6 @@
 """Flask application: pages and JSON API for Simple Music Tracker."""
 
+import json
 import os
 import sqlite3
 from datetime import date, datetime, timedelta
@@ -884,6 +885,8 @@ def api_settings():
             value = value if value in PAGE_DEFS else DEFAULT_HOME
         elif key == "nav_order":
             value = ",".join(normalize_nav_order(value))
+        elif key == "prefer_album_artist":
+            value = "true" if str(value).lower() in ("true", "1", "on", "yes") else "false"
         elif key == "musicbrainz_rate_limit_ms":
             # Clamp to >= 1000ms so we never undercut MusicBrainz's 1 req/sec.
             try:
@@ -899,6 +902,43 @@ def api_settings():
 def api_webhook_test():
     ok, message = webhooks.send_test()
     return jsonify({"ok": ok, "message": message})
+
+
+@app.route("/api/backup")
+def api_backup():
+    """Download a JSON backup of settings, artists and releases."""
+    data = db.export_data()
+    body = json.dumps(data, indent=2, ensure_ascii=False)
+    resp = app.response_class(body, mimetype="application/json")
+    resp.headers["Content-Disposition"] = (
+        f"attachment; filename=smt-backup-{date.today().isoformat()}.json"
+    )
+    return resp
+
+
+@app.route("/api/import", methods=["POST"])
+def api_import():
+    """Restore from a backup file (multipart 'file') or a raw JSON body.
+
+    This REPLACES all current settings and data.
+    """
+    payload = None
+    if "file" in request.files:
+        try:
+            payload = json.load(request.files["file"])
+        except (ValueError, OSError):
+            return jsonify({"error": "could not parse the uploaded file as JSON"}), 400
+    else:
+        payload = request.get_json(silent=True)
+
+    try:
+        result = db.import_data(payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": f"import failed: {exc}"}), 500
+
+    return jsonify({"imported": result})
 
 
 @app.route("/api/health")

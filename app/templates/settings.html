@@ -11,6 +11,13 @@
     <input type="text" id="music_directory" name="music_directory"
            value="{{ settings.music_directory }}">
     <p class="hint">Mount your library here, e.g. <code>-v /path/to/music:/music</code>.</p>
+
+    <label class="inline-check">
+      <input type="checkbox" id="prefer_album_artist" name="prefer_album_artist" value="true"
+        {{ 'checked' if settings.prefer_album_artist != 'false' }}>
+      Use the album-artist tag (fall back to track artist)
+    </label>
+    <p class="hint">When scanning, prefer each file's album artist over the per-track artist.</p>
   </fieldset>
 
   <fieldset>
@@ -129,6 +136,20 @@
     <span id="save-result" class="muted"></span>
   </div>
 </form>
+
+<fieldset class="settings-form">
+  <legend>Backup &amp; restore</legend>
+  <p class="hint">A backup is a JSON file containing your settings, artists, subscriptions and tracked releases.</p>
+  <p><a class="button-link" href="{{ url_for('api_backup') }}">Download backup</a></p>
+
+  <label for="import-file">Restore from a backup file</label>
+  <div class="tool-row">
+    <input type="file" id="import-file" accept="application/json,.json">
+    <button type="button" id="btn-import">Import &amp; replace</button>
+    <span id="import-result" class="muted"></span>
+  </div>
+  <p class="hint">Importing replaces all current settings and data with the backup's contents.</p>
+</fieldset>
 {% endblock %}
 
 {% block scripts %}

@@ -87,6 +87,7 @@ DEFAULT_SETTINGS = {
     "discography_autohide": "",             # categories collapsed by default on artist pages
     "home_page": "upcoming",                # which page '/' opens (Upcoming on first run)
     "nav_order": "artists,following,upcoming,ignored,settings",
+    "prefer_album_artist": "true",          # use the album-artist tag before the track artist
 }
 
 # Release types that may be monitored. Order is the display order.
@@ -195,3 +196,85 @@ def set_setting(key, value):
             conn.commit()
         finally:
             conn.close()
+
+
+# --- backup / restore -------------------------------------------------------
+
+BACKUP_VERSION = 1
+
+_ARTIST_COLUMNS = [
+    "id", "name", "sort_name", "mbid", "lastfm_url", "image_url", "bio",
+    "subscription", "monitor_types", "ignored", "track_count", "last_checked",
+    "created_at",
+]
+_RELEASE_COLUMNS = [
+    "id", "artist_id", "mbid", "title", "release_date", "primary_type",
+    "image_url", "notified", "created_at",
+]
+
+
+def _rows(conn, sql):
+    return [{k: r[k] for k in r.keys()} for r in conn.execute(sql)]
+
+
+def export_data():
+    """Return a JSON-serialisable snapshot of settings, artists and releases."""
+    from datetime import datetime, timezone
+    conn = get_connection()
+    try:
+        settings = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings")}
+        return {
+            "version": BACKUP_VERSION,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "settings": settings,
+            "artists": _rows(conn, "SELECT * FROM artists"),
+            "releases": _rows(conn, "SELECT * FROM releases"),
+        }
+    finally:
+        conn.close()
+
+
+def import_data(data):
+    """Replace all data with a previously exported snapshot.
+
+    Returns counts. Raises ValueError if the payload is not a valid backup.
+    """
+    if not isinstance(data, dict) or "artists" not in data or "settings" not in data:
+        raise ValueError("not a valid backup file")
+
+    settings = data.get("settings") or {}
+    artists = data.get("artists") or []
+    releases = data.get("releases") or []
+
+    def _insert(conn, table, columns, row):
+        cols = [c for c in columns if c in row]
+        placeholders = ",".join("?" for _ in cols)
+        conn.execute(
+            f"INSERT INTO {table} ({','.join(cols)}) VALUES ({placeholders})",
+            [row[c] for c in cols],
+        )
+
+    with _write_lock:
+        conn = get_connection()
+        try:
+            conn.execute("DELETE FROM releases")
+            conn.execute("DELETE FROM artists")
+            for key, value in settings.items():
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (str(key), None if value is None else str(value)),
+                )
+            for artist in artists:
+                _insert(conn, "artists", _ARTIST_COLUMNS, artist)
+            for release in releases:
+                _insert(conn, "releases", _RELEASE_COLUMNS, release)
+            conn.commit()
+        finally:
+            conn.close()
+
+    return {
+        "settings": len(settings),
+        "artists": len(artists),
+        "releases": len(releases),
+    }

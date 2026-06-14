@@ -56,6 +56,8 @@
     // Ensure checkbox groups are always sent, even when fully unchecked.
     if (!('default_monitor_types' in data)) data.default_monitor_types = '';
     if (!('discography_autohide' in data)) data.discography_autohide = '';
+    // A lone unchecked checkbox is absent from FormData; send false explicitly.
+    if (!('prefer_album_artist' in data)) data.prefer_album_artist = 'false';
     return data;
   }
 
@@ -84,4 +86,29 @@
       webhookResult.textContent = 'Failed.';
     });
   });
+
+  // --- import / restore from a backup file ---
+  const importBtn = document.getElementById('btn-import');
+  const importFile = document.getElementById('import-file');
+  const importResult = document.getElementById('import-result');
+  if (importBtn) {
+    importBtn.addEventListener('click', function () {
+      const file = importFile.files && importFile.files[0];
+      if (!file) { importResult.textContent = 'Choose a backup file first.'; return; }
+      if (!window.confirm('Importing replaces ALL current settings and data with this backup. Continue?')) return;
+      importResult.textContent = 'Importing...';
+      const fd = new FormData();
+      fd.append('file', file);
+      fetch('/api/import', { method: 'POST', body: fd })
+        .then(function (res) { return res.json(); })
+        .then(function (r) {
+          if (r.error) { importResult.textContent = r.error; return; }
+          const c = r.imported || {};
+          importResult.textContent = 'Imported ' + (c.artists || 0) + ' artists, ' +
+            (c.releases || 0) + ' releases. Reloading...';
+          setTimeout(function () { window.location.reload(); }, 1000);
+        })
+        .catch(function () { importResult.textContent = 'Import failed.'; });
+    });
+  }
 })();

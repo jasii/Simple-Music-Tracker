@@ -321,6 +321,15 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
 .settings-form select { width: 100%; margin-top: 0.2rem; }
 .settings-form textarea { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 0.85rem; }
 .form-actions { display: flex; align-items: center; gap: 0.8rem; }
+.inline-check { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600; margin-top: 0.6rem; }
+.button-link {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.35rem 0.6rem;
+  color: var(--fg);
+}
+.button-link:hover { border-color: var(--fg); text-decoration: none; }
 
 /* Nav order / home page editor */
 .nav-order { list-style: none; padding: 0; margin: 0.4rem 0 0; }
