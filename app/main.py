@@ -111,18 +111,63 @@ PAGE_DEFS = {
 PAGE_KEYS = list(PAGE_DEFS)
 DEFAULT_HOME = "upcoming"
 
+# Upcoming-page tab key -> label. Keys match the /api/upcoming window values.
+UPCOMING_TABS = {
+    "day": "Next 24h",
+    "week": "This week",
+    "next-week": "Following week",
+    "month": "This month",
+    "all": "All",
+}
+UPCOMING_KEYS = list(UPCOMING_TABS)
 
-def normalize_nav_order(value):
-    """Return a valid, de-duplicated page order with every page present."""
+
+def _ordered_subset(value, keys):
+    """Return *value* (a comma string) ordered to valid *keys*, all present."""
     ordered = []
     for key in (value or "").split(","):
         key = key.strip()
-        if key in PAGE_DEFS and key not in ordered:
+        if key in keys and key not in ordered:
             ordered.append(key)
-    for key in PAGE_KEYS:
+    for key in keys:
         if key not in ordered:
             ordered.append(key)
     return ordered
+
+
+def normalize_nav_order(value):
+    """Return a valid, de-duplicated page order with every page present."""
+    return _ordered_subset(value, PAGE_KEYS)
+
+
+def normalize_upcoming_order(value):
+    return _ordered_subset(value, UPCOMING_KEYS)
+
+
+def _clean_keys(value, keys):
+    """Return the subset of *keys* present in *value* (comma string or list)."""
+    if isinstance(value, str):
+        items = [v.strip() for v in value.split(",")]
+    else:
+        items = [str(v).strip() for v in (value or [])]
+    return [k for k in keys if k in items]
+
+
+def upcoming_all_tabs():
+    """Every upcoming tab in order, with a 'visible' flag (for settings)."""
+    order = normalize_upcoming_order(db.get_setting("upcoming_tabs_order"))
+    hidden = set(_clean_keys(db.get_setting("upcoming_tabs_hidden"), UPCOMING_KEYS))
+    return [
+        {"key": k, "label": UPCOMING_TABS[k], "visible": k not in hidden}
+        for k in order
+    ]
+
+
+def upcoming_visible_tabs():
+    """Visible upcoming tabs in order (falls back to all if none visible)."""
+    tabs = [t for t in upcoming_all_tabs() if t["visible"]]
+    return tabs or [{"key": k, "label": UPCOMING_TABS[k]} for k in
+                    normalize_upcoming_order(db.get_setting("upcoming_tabs_order"))]
 
 
 def _home_key():
@@ -161,7 +206,9 @@ def subscriptions_page():
 
 @app.route("/upcoming")
 def upcoming_page():
-    return render_template("upcoming.html", **_base_context(active="upcoming"))
+    ctx = _base_context(active="upcoming")
+    ctx["upcoming_tabs"] = upcoming_visible_tabs()
+    return render_template("upcoming.html", **ctx)
 
 
 @app.route("/ignored")
@@ -191,6 +238,7 @@ def settings_page():
     ctx = _base_context(active="settings")
     ctx["settings"] = db.get_all_settings()
     ctx["default_webhook_template"] = webhooks.DEFAULT_TEMPLATE
+    ctx["upcoming_tab_rows"] = upcoming_all_tabs()
     return render_template("settings.html", **ctx)
 
 
@@ -813,6 +861,10 @@ def api_settings():
             value = value if value in PAGE_DEFS else DEFAULT_HOME
         elif key == "nav_order":
             value = ",".join(normalize_nav_order(value))
+        elif key == "upcoming_tabs_order":
+            value = ",".join(normalize_upcoming_order(value))
+        elif key == "upcoming_tabs_hidden":
+            value = ",".join(_clean_keys(value, UPCOMING_KEYS))
         elif key == "musicbrainz_rate_limit_ms":
             # Clamp to >= 1000ms so we never undercut MusicBrainz's 1 req/sec.
             try:

@@ -87,6 +87,8 @@ DEFAULT_SETTINGS = {
     "discography_autohide": "",             # categories collapsed by default on artist pages
     "home_page": "upcoming",                # which page '/' opens (Upcoming on first run)
     "nav_order": "artists,following,upcoming,ignored,settings",
+    "upcoming_tabs_order": "day,week,next-week,month,all",
+    "upcoming_tabs_hidden": "",             # upcoming windows hidden from the tab bar
 }
 
 # Release types that may be monitored. Order is the display order.

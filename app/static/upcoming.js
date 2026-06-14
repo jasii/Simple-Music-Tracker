@@ -45,5 +45,7 @@
     load(w);
   });
 
-  load('day');
+  // Load whichever tab is first (the visible tabs/order come from settings).
+  const firstTab = tabs.querySelector('button');
+  load(firstTab ? firstTab.getAttribute('data-window') : 'day');
 })();

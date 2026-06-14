@@ -6,11 +6,9 @@
 <p class="muted">New and upcoming albums from artists you follow.</p>
 
 <div class="tabs" id="window-tabs">
-  <button data-window="day" class="on">Next 24h</button>
-  <button data-window="week">This week</button>
-  <button data-window="next-week">Following week</button>
-  <button data-window="month">This month</button>
-  <button data-window="all">All</button>
+  {% for tab in upcoming_tabs %}
+  <button data-window="{{ tab.key }}" class="{{ 'on' if loop.first }}">{{ tab.label }}</button>
+  {% endfor %}
 </div>
 
 <div id="upcoming-list" class="release-list">
