@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ artist.name }} - Simple Music Tracker{% endblock %}
+
+{% block content %}
+<p><a href="{{ url_for('index') }}">&larr; All artists</a></p>
+
+<div class="artist-header" data-artist-id="{{ artist.id }}">
+  {% if artist.image_url %}
+    <img class="artist-image" src="{{ artist.image_url }}" alt="" loading="lazy">
+  {% endif %}
+  <div class="artist-meta">
+    <h1>{{ artist.name }}</h1>
+    <p class="muted">{{ artist.track_count }} tracks in library
+      {% if artist.last_checked %}<span class="sep">/</span> checked {{ artist.last_checked }}{% endif %}
+    </p>
+    <div class="sub-controls">
+      <label><input type="radio" name="sub" value="none"
+        {{ 'checked' if artist.subscription == 'none' }}> Not following</label>
+      <label><input type="radio" name="sub" value="subscribed"
+        {{ 'checked' if artist.subscription == 'subscribed' }}> Subscribe</label>
+      <label><input type="radio" name="sub" value="notify"
+        {{ 'checked' if artist.subscription == 'notify' }}> Subscribe + Notify</label>
+      <button id="btn-refresh-artist" type="button">Refresh now</button>
+    </div>
+    {% if artist.lastfm_url %}<p><a href="{{ artist.lastfm_url }}" target="_blank" rel="noopener">Last.fm</a></p>{% endif %}
+  </div>
+</div>
+
+{% if artist.bio %}
+<div class="bio">{{ artist.bio | safe }}</div>
+{% endif %}
+
+<h2>Releases</h2>
+<div id="artist-releases" class="release-list">
+  <p class="muted">Loading...</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>window.ARTIST_ID = {{ artist.id }};</script>
+<script src="{{ url_for('static', filename='artist.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,14 @@
+services:
+  music-tracker:
+    build: .
+    container_name: simple-music-tracker
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persist the SQLite database.
+      - ./data:/data
+      # Mount your music library read-only. Set the path on the left to yours.
+      - /path/to/your/music:/music:ro
+    environment:
+      - SMT_DB_PATH=/data/tracker.db
+    restart: unless-stopped

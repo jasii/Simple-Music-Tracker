@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Settings - Simple Music Tracker{% endblock %}
+
+{% block content %}
+<h1>Settings</h1>
+
+<form id="settings-form" class="settings-form">
+  <fieldset>
+    <legend>Library</legend>
+    <label for="music_directory">Music directory (inside the container)</label>
+    <input type="text" id="music_directory" name="music_directory"
+           value="{{ settings.music_directory }}">
+    <p class="hint">Mount your library here, e.g. <code>-v /path/to/music:/music</code>.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>APIs</legend>
+    <label for="lastfm_api_key">Last.fm API key</label>
+    <input type="text" id="lastfm_api_key" name="lastfm_api_key"
+           value="{{ settings.lastfm_api_key }}" autocomplete="off">
+    <p class="hint">Used for artist bios and images. Get one at last.fm/api.</p>
+
+    <label for="musicbrainz_contact">MusicBrainz contact (email or URL)</label>
+    <input type="text" id="musicbrainz_contact" name="musicbrainz_contact"
+           value="{{ settings.musicbrainz_contact }}">
+    <p class="hint">Sent in the MusicBrainz User-Agent, as their API etiquette requests.</p>
+
+    <label for="check_interval_hours">Check interval (hours)</label>
+    <input type="number" id="check_interval_hours" name="check_interval_hours"
+           min="0.25" step="0.25" value="{{ settings.check_interval_hours }}">
+  </fieldset>
+
+  <fieldset>
+    <legend>Webhook (for "Notify" subscriptions)</legend>
+    <label for="webhook_url">Webhook URL</label>
+    <input type="text" id="webhook_url" name="webhook_url"
+           value="{{ settings.webhook_url }}" placeholder="https://...">
+
+    <label for="webhook_method">Method</label>
+    <select id="webhook_method" name="webhook_method">
+      {% for m in ['POST', 'PUT', 'GET'] %}
+        <option value="{{ m }}" {{ 'selected' if settings.webhook_method == m }}>{{ m }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="webhook_headers">Headers (JSON object or "Key: Value" per line)</label>
+    <textarea id="webhook_headers" name="webhook_headers" rows="3">{{ settings.webhook_headers }}</textarea>
+
+    <label for="webhook_template">Body template (JSON, supports {artist} {title} {release_date} {type} {image_url})</label>
+    <textarea id="webhook_template" name="webhook_template" rows="8"
+      placeholder="{{ default_webhook_template }}">{{ settings.webhook_template }}</textarea>
+    <p class="hint">Leave blank to use the built-in default payload.</p>
+
+    <button type="button" id="btn-test-webhook">Send test webhook</button>
+    <span id="webhook-result" class="muted"></span>
+  </fieldset>
+
+  <fieldset>
+    <legend>Appearance</legend>
+    <label for="default_theme">Default theme</label>
+    <select id="default_theme" name="default_theme">
+      <option value="dark" {{ 'selected' if settings.default_theme == 'dark' }}>Dark (AMOLED)</option>
+      <option value="light" {{ 'selected' if settings.default_theme == 'light' }}>Light</option>
+    </select>
+    <p class="hint">The toggle in the header overrides this per device.</p>
+  </fieldset>
+
+  <div class="form-actions">
+    <button type="submit">Save settings</button>
+    <span id="save-result" class="muted"></span>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='settings.js') }}"></script>
+{% endblock %}

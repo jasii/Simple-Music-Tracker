@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Upcoming - Simple Music Tracker{% endblock %}
+
+{% block content %}
+<h1>Upcoming Releases</h1>
+<p class="muted">New and upcoming albums from artists you follow.</p>
+
+<div class="tabs" id="window-tabs">
+  <button data-window="day" class="on">Next 24h</button>
+  <button data-window="week">This week</button>
+  <button data-window="next-week">Following week</button>
+  <button data-window="month">This month</button>
+  <button data-window="all">All</button>
+</div>
+
+<div id="upcoming-list" class="release-list">
+  <p class="muted">Loading...</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='upcoming.js') }}"></script>
+{% endblock %}

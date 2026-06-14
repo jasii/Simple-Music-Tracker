@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Artists - Simple Music Tracker{% endblock %}
+
+{% block content %}
+<h1>Artists</h1>
+
+<div class="stats" id="stats">
+  <span data-stat="artists">-</span> artists
+  <span class="sep">/</span>
+  <span data-stat="following">-</span> following
+  <span class="sep">/</span>
+  <span data-stat="upcoming_month">-</span> upcoming this month
+</div>
+
+<div class="toolbar">
+  <input type="search" id="artist-search" placeholder="Filter artists..." autocomplete="off">
+  <select id="filter-subscription">
+    <option value="">All</option>
+    <option value="following">Following</option>
+    <option value="subscribed">Subscribed</option>
+    <option value="notify">Notify</option>
+    <option value="none">Not followed</option>
+  </select>
+  <select id="sort-by">
+    <option value="name">Sort: Name</option>
+    <option value="tracks">Sort: Track count</option>
+    <option value="recent">Sort: Last checked</option>
+  </select>
+  <button id="btn-scan" type="button">Scan library</button>
+  <button id="btn-refresh" type="button">Refresh following</button>
+</div>
+
+<div class="progress" id="progress" hidden></div>
+
+<div class="bulk-bar" id="bulk-bar" hidden>
+  <span id="bulk-count">0 selected</span>
+  <button type="button" data-bulk="subscribed">Subscribe</button>
+  <button type="button" data-bulk="notify">Subscribe + Notify</button>
+  <button type="button" data-bulk="none">Unsubscribe</button>
+  <button type="button" id="bulk-clear">Clear selection</button>
+</div>
+
+<table class="artists-table" id="artists-table">
+  <thead>
+    <tr>
+      <th class="col-check"><input type="checkbox" id="select-all" title="Select all"></th>
+      <th class="col-name">Artist</th>
+      <th class="col-tracks">Tracks</th>
+      <th class="col-sub" title="Show on Following page">Sub</th>
+      <th class="col-notify" title="Subscribe and trigger webhook on new release">Notify</th>
+    </tr>
+  </thead>
+  <tbody id="artists-body">
+    <tr><td colspan="5" class="muted">Loading...</td></tr>
+  </tbody>
+</table>
+
+<p class="muted" id="table-footer"></p>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='artists.js') }}"></script>
+{% endblock %}
