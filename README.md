@@ -78,6 +78,11 @@ The SQLite database is stored in the `/data` volume so it survives restarts.
 3. Subscribe to artists (checkboxes). Subscribing triggers an immediate metadata
    fetch; after that, a background job re-checks on the configured interval.
 
+You can also **monitor an artist that isn't in your library** by pasting a
+MusicBrainz artist link (e.g. `https://musicbrainz.org/artist/<mbid>`) or a raw
+artist ID into the "Monitor an artist by MusicBrainz link" box on the Artists
+page. The artist is looked up on MusicBrainz, added, and followed immediately.
+
 ## Run locally (without Docker)
 
 ```bash
@@ -123,6 +128,7 @@ Use **Send test webhook** on the Settings page to verify your endpoint.
 | GET  | `/api/artists` | List artists. Params: `q`, `subscription` (`none\|subscribed\|notify\|following`), `sort` (`name\|tracks\|recent`), `limit`, `offset`. |
 | GET  | `/api/artists/<id>` | Artist detail with tracked releases. |
 | POST | `/api/artists/<id>/subscription` | Body `{"state": "none\|subscribed\|notify"}`. |
+| POST | `/api/artists/add` | Monitor an artist from a MusicBrainz link/ID. Body `{"link": "https://musicbrainz.org/artist/<mbid>", "state": "subscribed\|notify"}`. Creates the artist if not in the library. |
 | POST | `/api/artists/subscriptions` | Bulk: `{"ids": [...], "state": "..."}`. |
 | POST | `/api/artists/<id>/refresh` | Re-fetch one artist's info/releases now. |
 | GET  | `/api/subscriptions` | All followed artists. |

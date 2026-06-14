@@ -9,6 +9,7 @@ MusicBrainz asks for at most one request per second and a descriptive
 User-Agent, both of which are enforced here.
 """
 
+import re
 import threading
 import time
 from datetime import date, datetime, timedelta
@@ -16,6 +17,13 @@ from datetime import date, datetime, timedelta
 import requests
 
 from . import db
+
+# Matches a MusicBrainz artist id (UUID), whether pasted raw or inside a URL
+# like https://musicbrainz.org/artist/<mbid>.
+_MBID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    re.IGNORECASE,
+)
 
 MB_BASE = "https://musicbrainz.org/ws/2"
 CAA_BASE = "https://coverartarchive.org"
@@ -73,6 +81,30 @@ def resolve_mbid(name):
         if artist.get("name", "").lower() == lowered:
             return artist["id"]
     return artists[0]["id"]
+
+
+def extract_mbid(text):
+    """Pull an artist MBID out of a pasted URL or raw id. Returns None if absent."""
+    if not text:
+        return None
+    match = _MBID_RE.search(text)
+    return match.group(0).lower() if match else None
+
+
+def lookup_artist(mbid):
+    """Fetch an artist by MBID. Returns {mbid, name, sort_name} or None."""
+    try:
+        data = _rate_limited_get(f"{MB_BASE}/artist/{mbid}", {"fmt": "json"})
+    except requests.HTTPError:
+        return None
+    name = data.get("name")
+    if not name:
+        return None
+    return {
+        "mbid": data.get("id", mbid),
+        "name": name,
+        "sort_name": data.get("sort-name") or name,
+    }
 
 
 def _parse_date(value):

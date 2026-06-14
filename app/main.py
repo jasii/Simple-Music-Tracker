@@ -13,7 +13,7 @@ from flask import (
     url_for,
 )
 
-from . import db, scanner, scheduler, tracker, webhooks
+from . import db, musicbrainz, scanner, scheduler, tracker, webhooks
 
 app = Flask(__name__)
 
@@ -280,6 +280,69 @@ def api_set_subscription(artist_id):
         tracker.refresh_artist_in_background(artist_id)
 
     return jsonify({"id": artist_id, "subscription": state})
+
+
+@app.route("/api/artists/add", methods=["POST"])
+def api_add_artist():
+    """Start monitoring an artist from a pasted MusicBrainz link (or raw MBID).
+
+    Body: {"link": "https://musicbrainz.org/artist/<mbid>", "state": "subscribed"}.
+    Creates the artist if it isn't already in the library (track_count 0), sets
+    the subscription, and kicks off a metadata fetch.
+    """
+    payload = request.get_json(silent=True) or {}
+    link = payload.get("link") or payload.get("mbid") or payload.get("url") or ""
+    state = payload.get("state") or "subscribed"
+    if state not in ("subscribed", "notify"):
+        return jsonify({"error": "state must be 'subscribed' or 'notify'"}), 400
+
+    mbid = musicbrainz.extract_mbid(link)
+    if not mbid:
+        return jsonify({"error": "no MusicBrainz artist id found in that link"}), 400
+
+    # Look up the canonical name from MusicBrainz.
+    info = musicbrainz.lookup_artist(mbid)
+    if not info:
+        return jsonify({"error": "artist not found on MusicBrainz"}), 404
+
+    with db._write_lock:
+        conn = db.get_connection()
+        try:
+            # Match an existing row by MBID first, then by name.
+            existing = conn.execute(
+                "SELECT id FROM artists WHERE mbid = ? OR sort_name = ?",
+                (mbid, info["name"].lower()),
+            ).fetchone()
+            if existing:
+                artist_id = existing["id"]
+                conn.execute(
+                    "UPDATE artists SET subscription = ?, "
+                    "mbid = COALESCE(mbid, ?) WHERE id = ?",
+                    (state, mbid, artist_id),
+                )
+                created = False
+            else:
+                cur = conn.execute(
+                    "INSERT INTO artists (name, sort_name, mbid, subscription, track_count) "
+                    "VALUES (?, ?, ?, ?, 0)",
+                    (info["name"], info["name"].lower(), mbid, state),
+                )
+                artist_id = cur.lastrowid
+                created = True
+            conn.commit()
+        finally:
+            conn.close()
+
+    tracker.refresh_artist_in_background(artist_id)
+    return jsonify(
+        {
+            "id": artist_id,
+            "name": info["name"],
+            "mbid": mbid,
+            "subscription": state,
+            "created": created,
+        }
+    )
 
 
 @app.route("/api/artists/subscriptions", methods=["POST"])

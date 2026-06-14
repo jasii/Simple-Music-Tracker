@@ -200,6 +200,37 @@
     });
   });
 
+  // --- add / monitor an artist by MusicBrainz link ---
+  const mbLink = document.getElementById('mb-link');
+  const mbState = document.getElementById('mb-link-state');
+  const mbResult = document.getElementById('mb-link-result');
+  const mbBtn = document.getElementById('btn-add-link');
+
+  function addByLink() {
+    const link = mbLink.value.trim();
+    if (!link) return;
+    mbBtn.disabled = true;
+    mbResult.textContent = 'Looking up...';
+    SMT.postJSON('/api/artists/add', { link: link, state: mbState.value })
+      .then(function (r) {
+        if (r.error) {
+          mbResult.textContent = r.error;
+        } else {
+          mbResult.textContent = (r.created ? 'Added ' : 'Now following ') +
+            r.name + ' (' + r.subscription + '). Fetching releases...';
+          mbLink.value = '';
+          load().then(loadStats);
+        }
+      })
+      .catch(function () { mbResult.textContent = 'Failed to add artist.'; })
+      .finally(function () { mbBtn.disabled = false; });
+  }
+
+  mbBtn.addEventListener('click', addByLink);
+  mbLink.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); addByLink(); }
+  });
+
   // Resume progress display if a scan/refresh is already running on load.
   SMT.getJSON('/api/scan/status').then(function (s) { if (s.running) pollScan(); });
   SMT.getJSON('/api/refresh/status').then(function (s) { if (s.running) pollRefresh(); });
