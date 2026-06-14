@@ -28,14 +28,29 @@ _MBID_RE = re.compile(
 MB_BASE = "https://musicbrainz.org/ws/2"
 CAA_BASE = "https://coverartarchive.org"
 
-# Release-group types we care about for "new albums".
-WANTED_PRIMARY_TYPES = {"Album", "EP"}
+# Default release-group types to watch when an artist has no explicit selection.
+DEFAULT_TYPES = {"album", "ep"}
+
+# Map our lowercase type keys to MusicBrainz primary-type values.
+_TYPE_LABELS = {"album": "Album", "ep": "EP", "single": "Single"}
 
 # How far back a release still counts as "new" when surfacing it.
 RECENT_WINDOW_DAYS = 30
 
+# Serialise and pace all MusicBrainz requests so a large library can't trip
+# their rate limiting (which would get the instance temporarily blocked).
 _rate_lock = threading.Lock()
 _last_request = [0.0]
+
+
+def _min_interval():
+    """Minimum seconds between MusicBrainz requests, from settings."""
+    try:
+        ms = float(db.get_setting("musicbrainz_rate_limit_ms") or 1100)
+    except (TypeError, ValueError):
+        ms = 1100
+    # Never go below MusicBrainz's documented 1 req/sec ceiling.
+    return max(ms / 1000.0, 1.0)
 
 
 def _user_agent():
@@ -43,12 +58,18 @@ def _user_agent():
     return f"SimpleMusicTracker/1.0 ( {contact} )"
 
 
-def _rate_limited_get(url, params=None):
-    """GET with a global >=1.1s gap between MusicBrainz requests."""
+def _rate_limited_get(url, params=None, _attempt=1):
+    """GET MusicBrainz with global pacing and exponential backoff on throttling.
+
+    All callers funnel through here, so only one request is ever in flight and
+    consecutive requests are spaced by at least the configured interval.
+    """
+    max_attempts = 5
     with _rate_lock:
         elapsed = time.time() - _last_request[0]
-        if elapsed < 1.1:
-            time.sleep(1.1 - elapsed)
+        interval = _min_interval()
+        if elapsed < interval:
+            time.sleep(interval - elapsed)
         try:
             resp = requests.get(
                 url,
@@ -58,12 +79,25 @@ def _rate_limited_get(url, params=None):
             )
         finally:
             _last_request[0] = time.time()
-    if resp.status_code == 503:
-        # Service busy -- back off once and retry.
-        time.sleep(2)
-        return _rate_limited_get(url, params)
+
+    # 503 = service busy, 429 = rate limited. Back off and retry a few times.
+    if resp.status_code in (429, 503) and _attempt <= max_attempts:
+        retry_after = resp.headers.get("Retry-After")
+        try:
+            wait = float(retry_after) if retry_after else 2 ** _attempt
+        except ValueError:
+            wait = 2 ** _attempt
+        time.sleep(min(wait, 60))
+        return _rate_limited_get(url, params, _attempt + 1)
+
     resp.raise_for_status()
     return resp.json()
+
+
+def _type_filter(types):
+    """Build the MusicBrainz 'type' query value from our type keys."""
+    keys = [t for t in ("album", "ep", "single") if t in (types or DEFAULT_TYPES)]
+    return "|".join(keys) if keys else "album|ep"
 
 
 def resolve_mbid(name):
@@ -119,16 +153,17 @@ def _parse_date(value):
     return None
 
 
-def fetch_release_groups(mbid):
+def fetch_release_groups(mbid, types=None):
     """Return release-groups for an artist MBID, paging through results."""
     groups = []
     offset = 0
+    type_filter = _type_filter(types)
     while True:
         data = _rate_limited_get(
             f"{MB_BASE}/release-group",
             {
                 "artist": mbid,
-                "type": "album|ep",
+                "type": type_filter,
                 "fmt": "json",
                 "limit": 100,
                 "offset": offset,
@@ -148,11 +183,16 @@ def cover_art_url(release_group_mbid):
     return f"{CAA_BASE}/release-group/{release_group_mbid}/front-250"
 
 
-def find_upcoming(name, mbid=None):
+def find_upcoming(name, mbid=None, types=None):
     """Resolve an artist and return a list of upcoming/recent release dicts.
 
-    Each dict: {mbid, title, release_date, primary_type, image_url}.
+    *types* is a set of lowercase type keys ('album', 'ep', 'single'); only
+    matching release-groups are returned. Each dict:
+    {mbid, title, release_date, primary_type, image_url}.
     """
+    types = {t.lower() for t in (types or DEFAULT_TYPES)}
+    wanted_labels = {_TYPE_LABELS[t] for t in types if t in _TYPE_LABELS}
+
     if not mbid:
         mbid = resolve_mbid(name)
     if not mbid:
@@ -160,9 +200,9 @@ def find_upcoming(name, mbid=None):
 
     cutoff = date.today() - timedelta(days=RECENT_WINDOW_DAYS)
     results = []
-    for rg in fetch_release_groups(mbid):
+    for rg in fetch_release_groups(mbid, types):
         primary = rg.get("primary-type")
-        if primary not in WANTED_PRIMARY_TYPES:
+        if primary not in wanted_labels:
             continue
         released = _parse_date(rg.get("first-release-date"))
         if released is None or released < cutoff:

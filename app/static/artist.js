@@ -40,6 +40,28 @@
     });
   });
 
+  // Monitor-type checkboxes: persist the selection and re-fetch releases.
+  const mtypeResult = document.getElementById('mtype-result');
+  document.querySelectorAll('.mtype').forEach(function (cb) {
+    cb.addEventListener('change', function () {
+      const types = Array.from(document.querySelectorAll('.mtype:checked'))
+        .map(function (x) { return x.value; });
+      mtypeResult.textContent = 'Saving...';
+      SMT.postJSON('/api/artists/' + id + '/monitor-types', { types: types })
+        .then(function (r) {
+          // Server enforces a non-empty selection; reflect what it kept.
+          const kept = r.monitor_types || types;
+          document.querySelectorAll('.mtype').forEach(function (x) {
+            x.checked = kept.indexOf(x.value) !== -1;
+          });
+          mtypeResult.textContent = 'Saved (' + kept.join(', ') + ')';
+          setTimeout(function () { mtypeResult.textContent = ''; }, 2500);
+          setTimeout(load, 3000);
+        })
+        .catch(function () { mtypeResult.textContent = 'Failed.'; });
+    });
+  });
+
   const refreshBtn = document.getElementById('btn-refresh-artist');
   refreshBtn.addEventListener('click', function () {
     refreshBtn.textContent = 'Refreshing...';

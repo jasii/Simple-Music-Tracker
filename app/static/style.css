@@ -205,6 +205,8 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
 .sub-controls { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; margin: 0.5rem 0; }
 .sub-controls label { display: inline-flex; align-items: center; gap: 0.3rem; }
 .bio { margin: 1rem 0; color: var(--muted); }
+.monitor-types { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; margin: 0.4rem 0; }
+.monitor-types label { display: inline-flex; align-items: center; gap: 0.3rem; }
 
 /* Tabs */
 .tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.8rem 0; }

@@ -173,9 +173,10 @@
     SMT.getJSON('/api/refresh/status').then(function (s) {
       if (s.running) {
         progress.hidden = false;
-        progress.textContent = 'Refreshing following: ' + s.done + '/' + s.total +
-          ' (' + (s.message || '') + ')';
-        setTimeout(pollRefresh, 1500);
+        progress.textContent = 'Refreshing following: ' + (s.queued || 0) +
+          ' queued, ' + (s.processed || 0) + ' done' +
+          (s.message ? ' (last: ' + s.message + ')' : '');
+        setTimeout(pollRefresh, 2000);
       } else {
         progress.textContent = 'Refresh finished.';
         loadStats();

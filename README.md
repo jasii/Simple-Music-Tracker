@@ -20,6 +20,13 @@ a PWA with a mobile-friendly UI.
     tracked.
   - *Subscribe + Notify* — same as above, plus a webhook fires when a new release
     is detected.
+- **Per-artist release-type selection** — choose any combination of **Albums**,
+  **EPs**, and **Singles** to watch for each artist (set a default for new
+  follows in Settings).
+- **Built-in rate limiting** — every external lookup runs through a single
+  background worker, so even bulk-subscribing thousands of artists makes requests
+  one at a time, paced under MusicBrainz's limits (configurable, with automatic
+  backoff on 429/503). No risk of getting your instance blocked.
 - **Upcoming releases** for followed artists, grouped by window: next 24h, this
   week, the following week, this month, or all.
 - **Artist info** (bio, image, link) from the **Last.fm** API.
@@ -128,7 +135,8 @@ Use **Send test webhook** on the Settings page to verify your endpoint.
 | GET  | `/api/artists` | List artists. Params: `q`, `subscription` (`none\|subscribed\|notify\|following`), `sort` (`name\|tracks\|recent`), `limit`, `offset`. |
 | GET  | `/api/artists/<id>` | Artist detail with tracked releases. |
 | POST | `/api/artists/<id>/subscription` | Body `{"state": "none\|subscribed\|notify"}`. |
-| POST | `/api/artists/add` | Monitor an artist from a MusicBrainz link/ID. Body `{"link": "https://musicbrainz.org/artist/<mbid>", "state": "subscribed\|notify"}`. Creates the artist if not in the library. |
+| POST | `/api/artists/add` | Monitor an artist from a MusicBrainz link/ID. Body `{"link": "https://musicbrainz.org/artist/<mbid>", "state": "subscribed\|notify", "types": ["album","ep","single"]}`. Creates the artist if not in the library. |
+| POST | `/api/artists/<id>/monitor-types` | Set watched release types. Body `{"types": ["album","ep","single"]}` (non-empty subset). |
 | POST | `/api/artists/subscriptions` | Bulk: `{"ids": [...], "state": "..."}`. |
 | POST | `/api/artists/<id>/refresh` | Re-fetch one artist's info/releases now. |
 | GET  | `/api/subscriptions` | All followed artists. |
@@ -158,8 +166,19 @@ For each followed artist the app:
    last 30 days, and stores them.
 4. Cover art is linked from the Cover Art Archive.
 
-MusicBrainz requests are globally rate-limited to ~1/sec with a descriptive
-User-Agent, per their guidelines.
+Each artist is checked only for the release types you selected (Albums / EPs /
+Singles).
+
+## Rate limiting
+
+All MusicBrainz/Last.fm work is funneled through a **single background worker**
+draining a job queue, so no matter how many artists you bulk-subscribe, requests
+are made one at a time rather than fanning out into thousands of concurrent
+calls. On top of that, MusicBrainz requests are globally paced (minimum gap
+configurable in Settings, never below 1 request/second per their guidelines)
+with a descriptive User-Agent and automatic exponential backoff on `429`/`503`
+responses. This keeps a large library from tripping MusicBrainz's rate limiting
+and getting temporarily blocked.
 
 ## Tech
 
