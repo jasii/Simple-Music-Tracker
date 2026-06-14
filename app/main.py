@@ -133,6 +133,7 @@ def artist_page(artist_id):
         abort(404)
     ctx = _base_context(active="artists")
     ctx["artist"] = _row_to_dict(artist)
+    ctx["autohide"] = db.get_setting("discography_autohide") or ""
     return render_template("artist.html", **ctx)
 
 
@@ -337,6 +338,154 @@ def api_set_monitor_types(artist_id):
 
     tracker.enqueue_artist(artist_id)
     return jsonify({"id": artist_id, "monitor_types": kept})
+
+
+@app.route("/api/artists/<int:artist_id>/mbid", methods=["POST"])
+def api_set_mbid(artist_id):
+    """Match an existing library artist to a MusicBrainz artist URL/ID.
+
+    Body: {"link": "https://musicbrainz.org/artist/<mbid>"}. Sets the artist's
+    MBID, clears stale stored releases, and queues a refresh with the new id.
+    """
+    payload = request.get_json(silent=True) or {}
+    link = payload.get("link") or payload.get("mbid") or ""
+    mbid = musicbrainz.extract_mbid(link)
+    if not mbid:
+        return jsonify({"error": "no MusicBrainz artist id found in that link"}), 400
+
+    info = musicbrainz.lookup_artist(mbid)
+    if not info:
+        return jsonify({"error": "artist not found on MusicBrainz"}), 404
+
+    with db._write_lock:
+        conn = db.get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE artists SET mbid = ? WHERE id = ?", (mbid, artist_id)
+            )
+            # Drop releases gathered under the old identity so they re-fetch.
+            conn.execute("DELETE FROM releases WHERE artist_id = ?", (artist_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        if cur.rowcount == 0:
+            return jsonify({"error": "artist not found"}), 404
+
+    tracker.enqueue_artist(artist_id)
+    return jsonify({"id": artist_id, "mbid": mbid, "matched_name": info["name"]})
+
+
+@app.route("/api/artists/<int:artist_id>/merge", methods=["POST"])
+def api_merge_artists(artist_id):
+    """Merge one or more source artists into this (target) artist.
+
+    Body: {"source_ids": [..]}. Releases and track counts move to the target;
+    the target keeps its own name, subscription, monitor types and ignore state.
+    Source artists are then deleted.
+    """
+    payload = request.get_json(silent=True) or {}
+    source_ids = [int(i) for i in (payload.get("source_ids") or []) if str(i).isdigit()]
+    source_ids = [i for i in source_ids if i != artist_id]
+    if not source_ids:
+        return jsonify({"error": "no source artists to merge"}), 400
+
+    with db._write_lock:
+        conn = db.get_connection()
+        try:
+            target = conn.execute(
+                "SELECT * FROM artists WHERE id = ?", (artist_id,)
+            ).fetchone()
+            if target is None:
+                return jsonify({"error": "target artist not found"}), 404
+
+            merged = 0
+            target_mbid = target["mbid"]
+            for sid in source_ids:
+                source = conn.execute(
+                    "SELECT * FROM artists WHERE id = ?", (sid,)
+                ).fetchone()
+                if source is None:
+                    continue
+                # Move releases; UPDATE OR IGNORE leaves duplicates (same mbid)
+                # behind on the source, to be removed with it below.
+                conn.execute(
+                    "UPDATE OR IGNORE releases SET artist_id = ? WHERE artist_id = ?",
+                    (artist_id, sid),
+                )
+                conn.execute(
+                    "UPDATE artists SET track_count = track_count + ? WHERE id = ?",
+                    (source["track_count"] or 0, artist_id),
+                )
+                if not target_mbid and source["mbid"]:
+                    target_mbid = source["mbid"]
+                conn.execute("DELETE FROM artists WHERE id = ?", (sid,))
+                merged += 1
+
+            if target_mbid and target_mbid != target["mbid"]:
+                conn.execute(
+                    "UPDATE artists SET mbid = ? WHERE id = ?",
+                    (target_mbid, artist_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    return jsonify({"id": artist_id, "merged": merged})
+
+
+@app.route("/api/artists/<int:artist_id>/discography")
+def api_discography(artist_id):
+    """All albums/EPs/singles for an artist from MusicBrainz, fetched on demand.
+
+    Grouped and ordered Albums -> EPs -> Singles (newest first within each).
+    Only this route calls MusicBrainz for the full list, so it happens when the
+    user opens the artist page -- not during scans or background refreshes.
+    """
+    conn = db.get_connection()
+    try:
+        artist = conn.execute(
+            "SELECT * FROM artists WHERE id = ?", (artist_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if artist is None:
+        abort(404)
+
+    mbid = artist["mbid"]
+    try:
+        if not mbid:
+            mbid = musicbrainz.resolve_mbid(artist["name"])
+            if mbid:
+                with db._write_lock:
+                    conn = db.get_connection()
+                    try:
+                        conn.execute(
+                            "UPDATE artists SET mbid = ? WHERE id = ?",
+                            (mbid, artist_id),
+                        )
+                        conn.commit()
+                    finally:
+                        conn.close()
+        if not mbid:
+            return jsonify({"error": "no MusicBrainz match", "mbid": None,
+                            "groups": {"album": [], "ep": [], "single": []}})
+
+        items = musicbrainz.fetch_discography(mbid)
+    except Exception as exc:  # noqa: BLE001 - report fetch failures to the UI
+        return jsonify({"error": str(exc), "mbid": mbid,
+                        "groups": {"album": [], "ep": [], "single": []}}), 502
+
+    groups = {"album": [], "ep": [], "single": []}
+    label_to_key = {"Album": "album", "EP": "ep", "Single": "single"}
+    for item in items:
+        key = label_to_key.get(item["primary_type"])
+        if key:
+            groups[key].append(item)
+    for key in groups:
+        groups[key].sort(key=lambda r: r["release_date"] or "", reverse=True)
+
+    return jsonify({"mbid": mbid, "groups": groups,
+                    "counts": {k: len(v) for k, v in groups.items()}})
 
 
 @app.route("/api/artists/add", methods=["POST"])
@@ -609,6 +758,8 @@ def api_settings():
             continue
         if key == "default_monitor_types":
             value = db.normalize_monitor_types(value)
+        elif key == "discography_autohide":
+            value = ",".join(db.clean_types(value))
         elif key == "musicbrainz_rate_limit_ms":
             # Clamp to >= 1000ms so we never undercut MusicBrainz's 1 req/sec.
             try:

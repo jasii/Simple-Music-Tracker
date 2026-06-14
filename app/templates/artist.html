@@ -41,13 +41,41 @@
 <div class="bio">{{ artist.bio | safe }}</div>
 {% endif %}
 
-<h2>Releases</h2>
-<div id="artist-releases" class="release-list">
-  <p class="muted">Loading...</p>
+<details class="tools">
+  <summary>Tools: match / merge</summary>
+
+  <div class="tool-block">
+    <label for="mb-match">Match to a MusicBrainz artist URL or ID</label>
+    <div class="tool-row">
+      <input type="text" id="mb-match" placeholder="https://musicbrainz.org/artist/..."
+        value="{% if artist.mbid %}https://musicbrainz.org/artist/{{ artist.mbid }}{% endif %}">
+      <button id="btn-match" type="button">Match</button>
+      <span id="match-result" class="muted"></span>
+    </div>
+    <p class="hint">Sets the MusicBrainz id used to fetch this artist's releases.</p>
+  </div>
+
+  <div class="tool-block">
+    <label for="merge-search">Merge another artist into this one</label>
+    <div class="tool-row">
+      <input type="search" id="merge-search" placeholder="Search your library..." autocomplete="off">
+      <span id="merge-result" class="muted"></span>
+    </div>
+    <div id="merge-matches" class="merge-matches"></div>
+    <p class="hint">The other artist's tracks and releases move here; it is then removed.</p>
+  </div>
+</details>
+
+<h2>Discography <span class="muted" id="disco-source"></span></h2>
+<div id="discography">
+  <p class="muted">Loading from MusicBrainz...</p>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script>window.ARTIST_ID = {{ artist.id }};</script>
+<script>
+  window.ARTIST_ID = {{ artist.id }};
+  window.AUTOHIDE = {{ autohide | tojson }};
+</script>
 <script src="{{ url_for('static', filename='artist.js') }}"></script>
 {% endblock %}

@@ -84,6 +84,7 @@ DEFAULT_SETTINGS = {
     "musicbrainz_contact": "",      # email/url used in the MusicBrainz User-Agent
     "default_monitor_types": "album,ep",   # applied to newly followed artists
     "musicbrainz_rate_limit_ms": "1000",   # min gap between MusicBrainz requests (matches aurral)
+    "discography_autohide": "",             # categories collapsed by default on artist pages
 }
 
 # Release types that may be monitored. Order is the display order.
@@ -109,13 +110,18 @@ def _migrate(conn):
     )
 
 
-def normalize_monitor_types(value):
-    """Return a clean, ordered comma string from a list or comma string."""
+def clean_types(value):
+    """Return an ordered, validated subset of the type options (may be empty)."""
     if isinstance(value, str):
         items = [v.strip().lower() for v in value.split(",")]
     else:
         items = [str(v).strip().lower() for v in (value or [])]
-    chosen = [t for t in MONITOR_TYPE_OPTIONS if t in items]
+    return [t for t in MONITOR_TYPE_OPTIONS if t in items]
+
+
+def normalize_monitor_types(value):
+    """Return a clean, ordered comma string from a list or comma string."""
+    chosen = clean_types(value)
     # Never allow an empty selection -- fall back to the global default.
     if not chosen:
         chosen = [t for t in MONITOR_TYPE_OPTIONS

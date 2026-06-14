@@ -208,6 +208,45 @@ def cover_art_url(release_group_mbid):
     return f"{CAA_BASE}/release-group/{release_group_mbid}/front-250"
 
 
+# Short-lived cache of full discographies so revisiting an artist page (or a
+# quick reload) doesn't hit MusicBrainz again. Keyed by MBID.
+_DISCO_TTL = 900  # seconds (15 minutes)
+_disco_cache = {}
+_disco_lock = threading.Lock()
+
+
+def fetch_discography(mbid, use_cache=True):
+    """Return every album/EP/single release-group for an artist MBID.
+
+    Each item: {mbid, title, primary_type, release_date, image_url}. Results are
+    cached briefly to avoid repeat API calls when navigating around.
+    """
+    if use_cache:
+        with _disco_lock:
+            cached = _disco_cache.get(mbid)
+            if cached and (time.time() - cached[0]) < _DISCO_TTL:
+                return cached[1]
+
+    items = []
+    for rg in fetch_release_groups(mbid, {"album", "ep", "single"}):
+        primary = rg.get("primary-type")
+        if primary not in ("Album", "EP", "Single"):
+            continue
+        items.append(
+            {
+                "mbid": rg["id"],
+                "title": rg.get("title", "Untitled"),
+                "primary_type": primary,
+                "release_date": rg.get("first-release-date"),
+                "image_url": cover_art_url(rg["id"]),
+            }
+        )
+
+    with _disco_lock:
+        _disco_cache[mbid] = (time.time(), items)
+    return items
+
+
 def find_upcoming(name, mbid=None, types=None):
     """Resolve an artist and return a list of upcoming/recent release dicts.
 

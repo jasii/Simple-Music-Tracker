@@ -24,6 +24,15 @@ a PWA with a mobile-friendly UI.
   releases music) from the main library list. Ignored artists are parked on a
   separate **Ignored** page where you can un-ignore them at any time, so nothing
   is ever lost.
+- **Merge artists** to combine duplicates (e.g. "Beatles" and "The Beatles") into
+  one record, moving their tracks and releases together.
+- **Match to MusicBrainz** by pasting an artist URL on the artist page to fix or
+  set the MusicBrainz id used for release lookups.
+- **Full discography on demand** — opening an artist page fetches all their
+  Albums, EPs, and Singles from MusicBrainz (in that order, newest first), each
+  category with a show/hide toggle. The MusicBrainz call happens only when you
+  open the artist page (and is briefly cached), to keep API usage low. A setting
+  lets you auto-hide chosen categories by default.
 - **Two subscription levels** per artist:
   - *Subscribe* — the artist shows on your Following page and their releases are
     tracked.
@@ -198,6 +207,9 @@ Use **Send test webhook** on the Settings page to verify your endpoint.
 | POST | `/api/artists/<id>/ignore` | Hide/unhide an artist. Body `{"ignored": true\|false}`. |
 | POST | `/api/artists/ignore` | Bulk hide/unhide. Body `{"ids": [...], "ignored": true\|false}`. |
 | GET  | `/api/ignored` | List ignored artists. |
+| POST | `/api/artists/<id>/mbid` | Match an artist to a MusicBrainz URL/ID. Body `{"link": "https://musicbrainz.org/artist/<mbid>"}`. |
+| POST | `/api/artists/<id>/merge` | Merge other artists into this one. Body `{"source_ids": [...]}`. |
+| GET  | `/api/artists/<id>/discography` | All albums/EPs/singles from MusicBrainz (on-demand), grouped and ordered. |
 | POST | `/api/artists/subscriptions` | Bulk: `{"ids": [...], "state": "..."}`. |
 | POST | `/api/artists/<id>/refresh` | Re-fetch one artist's info/releases now. |
 | GET  | `/api/subscriptions` | All followed artists. |
