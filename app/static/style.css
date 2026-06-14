@@ -248,6 +248,22 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
 .settings-form textarea { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 0.85rem; }
 .form-actions { display: flex; align-items: center; gap: 0.8rem; }
 
+/* Nav order / home page editor */
+.nav-order { list-style: none; padding: 0; margin: 0.4rem 0 0; }
+.nav-order li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  margin-bottom: 0.4rem;
+}
+.nav-order .nav-home { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--muted); font-weight: 400; }
+.nav-order .nav-label { font-weight: 600; flex: 1; }
+.nav-order-buttons { display: flex; gap: 0.3rem; }
+.nav-order-buttons button { padding: 0.1rem 0.5rem; font-size: 0.8rem; }
+
 @media (max-width: 600px) {
   .col-tracks { display: none; }
   .artists-table thead th { top: 5.5rem; }

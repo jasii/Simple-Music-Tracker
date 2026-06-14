@@ -2,7 +2,7 @@
 {% block title %}{{ artist.name }} - Simple Music Tracker{% endblock %}
 
 {% block content %}
-<p><a href="{{ url_for('index') }}">&larr; All artists</a></p>
+<p><a href="{{ url_for('artists_page') }}">&larr; All artists</a></p>
 
 <div class="artist-header" data-artist-id="{{ artist.id }}">
   {% if artist.image_url %}

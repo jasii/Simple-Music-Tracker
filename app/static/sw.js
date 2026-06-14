@@ -2,9 +2,10 @@
 // API responses are always fetched fresh (network-first); static assets are
 // cache-first.
 
-const CACHE = 'smt-v1';
+const CACHE = 'smt-v2';
+// '/' is intentionally omitted: it now redirects to the configurable home page,
+// and a redirect response can't be reliably cached.
 const SHELL = [
-  '/',
   '/static/style.css',
   '/static/app.js',
   '/static/icon.svg',

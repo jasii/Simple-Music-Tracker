@@ -98,16 +98,65 @@ def _query_upcoming(window="month", include_past=False):
     return results
 
 
+# --- navigation -------------------------------------------------------------
+
+# key -> (endpoint, label). The key is also the value stored in settings.
+PAGE_DEFS = {
+    "artists": ("artists_page", "Artists"),
+    "following": ("subscriptions_page", "Following"),
+    "upcoming": ("upcoming_page", "Upcoming"),
+    "ignored": ("ignored_page", "Ignored"),
+    "settings": ("settings_page", "Settings"),
+}
+PAGE_KEYS = list(PAGE_DEFS)
+DEFAULT_HOME = "upcoming"
+
+
+def normalize_nav_order(value):
+    """Return a valid, de-duplicated page order with every page present."""
+    ordered = []
+    for key in (value or "").split(","):
+        key = key.strip()
+        if key in PAGE_DEFS and key not in ordered:
+            ordered.append(key)
+    for key in PAGE_KEYS:
+        if key not in ordered:
+            ordered.append(key)
+    return ordered
+
+
+def _home_key():
+    home = db.get_setting("home_page") or DEFAULT_HOME
+    return home if home in PAGE_DEFS else DEFAULT_HOME
+
+
+@app.context_processor
+def inject_nav():
+    """Make the (ordered) nav items and labels available to every template."""
+    order = normalize_nav_order(db.get_setting("nav_order"))
+    items = [
+        {"key": k, "endpoint": PAGE_DEFS[k][0], "label": PAGE_DEFS[k][1]}
+        for k in order
+    ]
+    return {"nav_items": items}
+
+
 # --- pages ------------------------------------------------------------------
 
 @app.route("/")
-def index():
+def home():
+    # The home page is configurable; send the user to their chosen page.
+    return redirect(url_for(PAGE_DEFS[_home_key()][0]))
+
+
+@app.route("/artists")
+def artists_page():
     return render_template("index.html", **_base_context(active="artists"))
 
 
 @app.route("/subscriptions")
 def subscriptions_page():
-    return render_template("subscriptions.html", **_base_context(active="subscriptions"))
+    return render_template("subscriptions.html", **_base_context(active="following"))
 
 
 @app.route("/upcoming")
@@ -760,6 +809,10 @@ def api_settings():
             value = db.normalize_monitor_types(value)
         elif key == "discography_autohide":
             value = ",".join(db.clean_types(value))
+        elif key == "home_page":
+            value = value if value in PAGE_DEFS else DEFAULT_HOME
+        elif key == "nav_order":
+            value = ",".join(normalize_nav_order(value))
         elif key == "musicbrainz_rate_limit_ms":
             # Clamp to >= 1000ms so we never undercut MusicBrainz's 1 req/sec.
             try:

@@ -50,6 +50,8 @@ a PWA with a mobile-friendly UI.
 - **Artist info** (bio, image, link) from the **Last.fm** API.
 - **Upcoming albums** discovered via **MusicBrainz** release-groups (the same
   approach aurral uses), with cover art from the Cover Art Archive.
+- **Configurable navigation** — reorder the nav tabs and choose which page is the
+  home page (what `/` opens). Defaults to **Upcoming** on first run.
 - **Settings page** to configure the music directory, API keys, webhook, check
   interval, and default theme.
 - **JSON API** for everything, including the upcoming-releases feeds.
