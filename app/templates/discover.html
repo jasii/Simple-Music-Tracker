@@ -5,18 +5,34 @@
 <h1>Discover</h1>
 <p class="muted">Find new music to track that may not be in your library yet.</p>
 
-<section class="discover-section">
-  <div class="discover-head">
-    <h2>Last.fm &mdash; Coming Soon (Recommended)</h2>
-    <button id="lastfm-refresh" type="button">Refresh</button>
+<div class="discover-controls">
+  <div class="tabs" id="view-toggle">
+    <button data-view="agenda" class="on">Agenda</button>
+    <button data-view="calendar">Calendar</button>
   </div>
-  <p class="muted" id="lastfm-status"></p>
-  <div id="lastfm-releases" class="discover-grid">
+  <div id="source-filters" class="source-filters"></div>
+  <button id="discover-refresh" type="button">Refresh</button>
+</div>
+<p class="muted" id="discover-status"></p>
+
+<div id="agenda-view">
+  <div id="agenda-list" class="agenda">
     <p class="muted">Loading...</p>
   </div>
-</section>
+</div>
+
+<div id="calendar-view" hidden>
+  <div class="cal-header">
+    <button id="cal-prev" type="button" title="Previous month">&larr;</button>
+    <span id="cal-title" class="cal-title"></span>
+    <button id="cal-next" type="button" title="Next month">&rarr;</button>
+    <button id="cal-today" type="button">Today</button>
+  </div>
+  <div id="calendar" class="calendar"></div>
+</div>
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='relview.js') }}"></script>
 <script src="{{ url_for('static', filename='discover.js') }}"></script>
 {% endblock %}

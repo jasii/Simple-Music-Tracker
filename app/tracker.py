@@ -105,20 +105,8 @@ def refresh_artist(artist_id, fire_webhooks=True):
             )
             conn.commit()
 
-        # Fire webhooks for genuinely new releases if the user wants notifications.
-        notified = 0
-        if fire_webhooks and artist["subscription"] == "notify":
-            for rel in new_releases:
-                ok, _msg = webhooks.fire(artist, rel)
-                if ok:
-                    with db._write_lock:
-                        conn.execute(
-                            "UPDATE releases SET notified = 1 "
-                            "WHERE artist_id = ? AND mbid = ?",
-                            (artist_id, rel["mbid"]),
-                        )
-                        conn.commit()
-                    notified += 1
+        # Fire any webhooks now due for this artist (honours the trigger timing).
+        notified = process_pending_webhooks(artist_id) if fire_webhooks else 0
 
         return {
             "artist": artist["name"],
@@ -130,6 +118,97 @@ def refresh_artist(artist_id, fire_webhooks=True):
         return {"error": str(exc)}
     finally:
         conn.close()
+
+
+# --- webhook delivery timing ------------------------------------------------
+
+_UNIT_SECONDS = {"hours": 3600, "days": 86400, "weeks": 604800}
+
+
+def _normalize_date(value):
+    """Expand a partial 'YYYY'/'YYYY-MM' date to a date object, else None."""
+    if not value:
+        return None
+    parts = value.split("-")
+    try:
+        year = int(parts[0])
+        month = int(parts[1]) if len(parts) > 1 else 1
+        day = int(parts[2]) if len(parts) > 2 else 1
+        from datetime import date
+        return date(year, month, day)
+    except (ValueError, IndexError):
+        return None
+
+
+def _lead_seconds():
+    try:
+        value = float(db.get_setting("webhook_lead_value") or 0)
+    except (TypeError, ValueError):
+        value = 0
+    unit = db.get_setting("webhook_lead_unit") or "days"
+    return value * _UNIT_SECONDS.get(unit, 86400)
+
+
+def process_pending_webhooks(artist_id=None):
+    """Fire due 'notify' webhooks for un-notified releases. Returns count sent.
+
+    'discovery' mode fires as soon as a release is stored; 'before_release'
+    mode waits until the configured lead time before the release date.
+    """
+    if not (db.get_setting("webhook_url") or "").strip():
+        return 0
+    mode = db.get_setting("webhook_trigger") or "discovery"
+    lead = _lead_seconds()
+    import time as _time
+    now = _time.time()
+
+    conn = db.get_connection()
+    try:
+        sql = (
+            "SELECT r.id AS rid, r.mbid, r.title, r.release_date, r.primary_type, "
+            "r.image_url, a.id AS artist_id, a.name AS name "
+            "FROM releases r JOIN artists a ON a.id = r.artist_id "
+            "WHERE a.subscription = 'notify' AND r.notified = 0"
+        )
+        params = []
+        if artist_id is not None:
+            sql += " AND a.id = ?"
+            params.append(artist_id)
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+
+    sent = 0
+    for row in rows:
+        if mode == "before_release":
+            rd = _normalize_date(row["release_date"])
+            if rd is None:
+                continue  # can't time it without a date; wait until one is known
+            from datetime import datetime
+            release_ts = datetime(rd.year, rd.month, rd.day).timestamp()
+            if now < release_ts - lead:
+                continue  # not within the lead window yet
+
+        artist = {"name": row["name"]}
+        release = {
+            "title": row["title"],
+            "release_date": row["release_date"],
+            "primary_type": row["primary_type"],
+            "image_url": row["image_url"],
+        }
+        ok, _msg = webhooks.fire(artist, release)
+        if ok:
+            with db._write_lock:
+                wconn = db.get_connection()
+                try:
+                    wconn.execute(
+                        "UPDATE releases SET notified = 1 WHERE id = ?", (row["rid"],)
+                    )
+                    wconn.commit()
+                finally:
+                    wconn.close()
+            sent += 1
+    return sent
 
 
 # --- single-worker queue ----------------------------------------------------

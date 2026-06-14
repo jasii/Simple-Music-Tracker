@@ -48,6 +48,12 @@ def _loop():
                 except Exception:  # noqa: BLE001
                     pass
 
+        # Fire any 'notify' webhooks that have reached their trigger time.
+        try:
+            tracker.process_pending_webhooks()
+        except Exception:  # noqa: BLE001
+            pass
+
         time.sleep(60)
 
 

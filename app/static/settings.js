@@ -4,25 +4,17 @@
   const form = document.getElementById('settings-form');
   const saveResult = document.getElementById('save-result');
 
-  // --- reorderable lists (nav tabs + upcoming tabs) ---
-  // opts.hiddenInputId, if given, is kept in sync with the unchecked rows'
-  // keys (so a list can carry both an order and a hidden set).
-  function wireReorder(listId, orderInputId, opts) {
+  // --- reorderable list (nav tabs) with drag-and-drop + Up/Down ---
+  // The first item is highlighted as the home page.
+  function wireReorder(listId, orderInputId) {
     const list = document.getElementById(listId);
     const orderInput = document.getElementById(orderInputId);
     if (!list || !orderInput) return;
-    opts = opts || {};
-    const hiddenInput = opts.hiddenInputId ? document.getElementById(opts.hiddenInputId) : null;
 
     function sync() {
       const lis = Array.from(list.querySelectorAll('li'));
       orderInput.value = lis.map(function (li) { return li.getAttribute('data-key'); }).join(',');
-      if (hiddenInput) {
-        hiddenInput.value = lis.filter(function (li) {
-          const cb = li.querySelector('input[type="checkbox"]');
-          return cb && !cb.checked;
-        }).map(function (li) { return li.getAttribute('data-key'); }).join(',');
-      }
+      lis.forEach(function (li, i) { li.classList.toggle('is-home', i === 0); });
     }
 
     list.addEventListener('click', function (e) {
@@ -36,15 +28,42 @@
         sync();
       }
     });
-    if (hiddenInput) {
-      list.addEventListener('change', function (e) {
-        if (e.target.type === 'checkbox') sync();
+
+    // Drag and drop.
+    let dragging = null;
+    list.addEventListener('dragstart', function (e) {
+      dragging = e.target.closest('li');
+      if (dragging) { dragging.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; }
+    });
+    list.addEventListener('dragend', function () {
+      if (dragging) dragging.classList.remove('dragging');
+      dragging = null;
+      sync();
+    });
+    list.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      if (!dragging) return;
+      const after = Array.from(list.querySelectorAll('li:not(.dragging)')).find(function (li) {
+        const box = li.getBoundingClientRect();
+        return e.clientY < box.top + box.height / 2;
       });
-    }
+      if (after) list.insertBefore(dragging, after);
+      else list.appendChild(dragging);
+    });
+
     sync();
   }
 
   wireReorder('nav-order-list', 'nav_order');
+
+  // Show the webhook lead-time fields only for the "before release" trigger.
+  const trigger = document.getElementById('webhook_trigger');
+  const leadFields = document.getElementById('webhook-lead-fields');
+  if (trigger && leadFields) {
+    const syncLead = function () { leadFields.style.display = trigger.value === 'before_release' ? '' : 'none'; };
+    trigger.addEventListener('change', syncLead);
+    syncLead();
+  }
 
   // Collect form values, joining repeated keys (e.g. the monitor-type
   // checkboxes) into a comma string the API understands.
