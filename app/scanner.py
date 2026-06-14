@@ -27,8 +27,10 @@ AUDIO_EXTENSIONS = {
     ".wma", ".wav", ".aiff", ".aif", ".ape", ".mpc",
 }
 
-# Tag keys that may hold the artist name across the various container formats.
-_ARTIST_TAGS = ["albumartist", "album artist", "artist", "TPE2", "TPE1", "\xa9ART", "aART"]
+# Tag keys grouped so the album artist is preferred over the track artist.
+# (_first_tag_value also tries lower/upper-case variants of each key.)
+_ALBUM_ARTIST_TAGS = ["albumartist", "album artist", "aART", "TPE2"]
+_TRACK_ARTIST_TAGS = ["artist", "TPE1", "\xa9ART"]
 _MBID_TAGS = [
     "musicbrainz_albumartistid",
     "musicbrainz_artistid",
@@ -79,8 +81,13 @@ def _first_tag_value(tags, keys):
     return None
 
 
-def _extract(path):
-    """Return (artist_name, mbid) for an audio file, or (None, None)."""
+def _extract(path, prefer_album=True):
+    """Return (artist_name, mbid) for an audio file, or (None, None).
+
+    When *prefer_album* the album-artist tag is used and the track artist is
+    only a fallback (so e.g. compilations stay under one album artist); set it
+    False to prefer the per-track artist instead.
+    """
     try:
         audio = MutagenFile(path, easy=True)
     except Exception:
@@ -94,7 +101,12 @@ def _extract(path):
         return None, None
 
     tags = getattr(audio, "tags", None) or audio
-    name = _first_tag_value(tags, _ARTIST_TAGS)
+    album_artist = _first_tag_value(tags, _ALBUM_ARTIST_TAGS)
+    track_artist = _first_tag_value(tags, _TRACK_ARTIST_TAGS)
+    if prefer_album:
+        name = album_artist or track_artist
+    else:
+        name = track_artist or album_artist
     mbid = _first_tag_value(tags, _MBID_TAGS)
     return name, mbid
 
@@ -167,6 +179,8 @@ def scan_directory(directory, quick=False):
         if not directory or not os.path.isdir(directory):
             raise FileNotFoundError(f"music directory not found: {directory!r}")
 
+        prefer_album = (db.get_setting("prefer_album_artist") or "true") != "false"
+
         last_scan = 0.0
         if quick:
             try:
@@ -198,7 +212,7 @@ def scan_directory(directory, quick=False):
                     except OSError:
                         continue
 
-                name, mbid = _extract(path)
+                name, mbid = _extract(path, prefer_album)
                 processed += 1
                 if not name:
                     continue

@@ -1,6 +1,8 @@
 """Flask application: pages and JSON API for Simple Music Tracker."""
 
+import json
 import os
+import sqlite3
 from datetime import date, datetime, timedelta
 
 from flask import (
@@ -433,13 +435,15 @@ def api_set_mbid(artist_id):
 def api_merge_artists(artist_id):
     """Merge one or more source artists into this (target) artist.
 
-    Body: {"source_ids": [..]}. Releases and track counts move to the target;
-    the target keeps its own name, subscription, monitor types and ignore state.
+    Body: {"source_ids": [..], "name": "<optional chosen name>"}. Releases and
+    track counts move to the target, which keeps its subscription, monitor types
+    and ignore state; the resulting name is the target's unless *name* is given.
     Source artists are then deleted.
     """
     payload = request.get_json(silent=True) or {}
     source_ids = [int(i) for i in (payload.get("source_ids") or []) if str(i).isdigit()]
     source_ids = [i for i in source_ids if i != artist_id]
+    chosen_name = (payload.get("name") or "").strip()
     if not source_ids:
         return jsonify({"error": "no source artists to merge"}), 400
 
@@ -480,11 +484,25 @@ def api_merge_artists(artist_id):
                     "UPDATE artists SET mbid = ? WHERE id = ?",
                     (target_mbid, artist_id),
                 )
+            # Apply the chosen display name (sources are gone, so the only
+            # possible sort_name clash is a different artist -- ignore if so).
+            if chosen_name and chosen_name != target["name"]:
+                try:
+                    conn.execute(
+                        "UPDATE artists SET name = ?, sort_name = ? WHERE id = ?",
+                        (chosen_name, chosen_name.lower(), artist_id),
+                    )
+                except sqlite3.IntegrityError:
+                    pass
             conn.commit()
+
+            final = conn.execute(
+                "SELECT name FROM artists WHERE id = ?", (artist_id,)
+            ).fetchone()
         finally:
             conn.close()
 
-    return jsonify({"id": artist_id, "merged": merged})
+    return jsonify({"id": artist_id, "merged": merged, "name": final["name"]})
 
 
 @app.route("/api/artists/<int:artist_id>/discography")
@@ -867,6 +885,8 @@ def api_settings():
             value = value if value in PAGE_DEFS else DEFAULT_HOME
         elif key == "nav_order":
             value = ",".join(normalize_nav_order(value))
+        elif key == "prefer_album_artist":
+            value = "true" if str(value).lower() in ("true", "1", "on", "yes") else "false"
         elif key == "musicbrainz_rate_limit_ms":
             # Clamp to >= 1000ms so we never undercut MusicBrainz's 1 req/sec.
             try:
@@ -882,6 +902,43 @@ def api_settings():
 def api_webhook_test():
     ok, message = webhooks.send_test()
     return jsonify({"ok": ok, "message": message})
+
+
+@app.route("/api/backup")
+def api_backup():
+    """Download a JSON backup of settings, artists and releases."""
+    data = db.export_data()
+    body = json.dumps(data, indent=2, ensure_ascii=False)
+    resp = app.response_class(body, mimetype="application/json")
+    resp.headers["Content-Disposition"] = (
+        f"attachment; filename=smt-backup-{date.today().isoformat()}.json"
+    )
+    return resp
+
+
+@app.route("/api/import", methods=["POST"])
+def api_import():
+    """Restore from a backup file (multipart 'file') or a raw JSON body.
+
+    This REPLACES all current settings and data.
+    """
+    payload = None
+    if "file" in request.files:
+        try:
+            payload = json.load(request.files["file"])
+        except (ValueError, OSError):
+            return jsonify({"error": "could not parse the uploaded file as JSON"}), 400
+    else:
+        payload = request.get_json(silent=True)
+
+    try:
+        result = db.import_data(payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": f"import failed: {exc}"}), 500
+
+    return jsonify({"imported": result})
 
 
 @app.route("/api/health")

@@ -117,24 +117,74 @@
     }).catch(function () { matchResult.textContent = 'Failed.'; });
   });
 
-  // --- merge another artist into this one ---
+  // --- merge another artist into this one (with a side-by-side preview) ---
   const mergeSearch = document.getElementById('merge-search');
   const mergeMatches = document.getElementById('merge-matches');
+  const mergeCompare = document.getElementById('merge-compare');
   const mergeResult = document.getElementById('merge-result');
   let mergeTimer;
+  let compare = null; // {target, source}
 
   function renderMergeMatches(items) {
     const others = items.filter(function (a) { return a.id !== id; });
     if (!others.length) { mergeMatches.innerHTML = ''; return; }
     mergeMatches.innerHTML = others.slice(0, 20).map(function (a) {
-      return '<button type="button" class="merge-pick" data-id="' + a.id + '" ' +
-        'data-name="' + SMT.esc(a.name) + '">' + SMT.esc(a.name) +
-        ' <span class="muted">(' + (a.track_count || 0) + ' tracks)</span></button>';
+      return '<button type="button" class="merge-pick" data-id="' + a.id + '">' +
+        SMT.esc(a.name) + ' <span class="muted">(' + (a.track_count || 0) +
+        ' tracks)</span></button>';
     }).join('');
+  }
+
+  function artistCard(a, role) {
+    const img = a.image_url
+      ? '<img src="' + SMT.esc(a.image_url) + '" alt="" loading="lazy" ' +
+        'onerror="this.style.visibility=\'hidden\'">'
+      : '';
+    const releases = a.releases ? a.releases.length : 0;
+    return (
+      '<div class="cmp-card">' +
+      '<div class="cmp-role muted">' + role + '</div>' + img +
+      '<div class="cmp-name">' + SMT.esc(a.name) + '</div>' +
+      '<div class="muted">' + (a.track_count || 0) + ' tracks · ' + releases + ' releases</div>' +
+      '<div class="muted">MusicBrainz: ' + (a.mbid ? 'matched' : 'none') + '</div>' +
+      '<div class="muted">Status: ' + SMT.esc(a.subscription || 'none') + '</div>' +
+      '</div>'
+    );
+  }
+
+  function showCompare(sourceId) {
+    mergeCompare.innerHTML = '<p class="muted">Loading comparison...</p>';
+    Promise.all([
+      SMT.getJSON('/api/artists/' + id),
+      SMT.getJSON('/api/artists/' + sourceId),
+    ]).then(function (res) {
+      compare = { target: res[0], source: res[1] };
+      const t = compare.target, s = compare.source;
+      mergeCompare.innerHTML =
+        '<div class="cmp-grid">' +
+        artistCard(t, 'Keep (this artist)') +
+        artistCard(s, 'Merge in &amp; remove') +
+        '</div>' +
+        '<div class="cmp-choose"><span class="cmp-choose-label">Keep name:</span>' +
+        '<label><input type="radio" name="merge-name" value="target" checked> ' +
+        SMT.esc(t.name) + '</label>' +
+        (s.name.toLowerCase() !== t.name.toLowerCase()
+          ? '<label><input type="radio" name="merge-name" value="source"> ' +
+            SMT.esc(s.name) + '</label>'
+          : '') +
+        '</div>' +
+        '<div class="cmp-actions">' +
+        '<button type="button" id="merge-confirm">Merge these</button> ' +
+        '<button type="button" id="merge-cancel">Cancel</button></div>';
+    }).catch(function () {
+      mergeCompare.innerHTML = '<p class="muted">Failed to load comparison.</p>';
+    });
   }
 
   mergeSearch.addEventListener('input', function () {
     clearTimeout(mergeTimer);
+    mergeCompare.innerHTML = '';
+    compare = null;
     const q = mergeSearch.value.trim();
     if (q.length < 2) { mergeMatches.innerHTML = ''; return; }
     mergeTimer = setTimeout(function () {
@@ -146,15 +196,30 @@
   mergeMatches.addEventListener('click', function (e) {
     const btn = e.target.closest('.merge-pick');
     if (!btn) return;
-    const sourceId = parseInt(btn.getAttribute('data-id'), 10);
-    const name = btn.getAttribute('data-name');
-    if (!window.confirm('Merge "' + name + '" into this artist? This removes "' + name + '".')) return;
+    showCompare(parseInt(btn.getAttribute('data-id'), 10));
+  });
+
+  mergeCompare.addEventListener('click', function (e) {
+    if (e.target.id === 'merge-cancel') {
+      mergeCompare.innerHTML = '';
+      compare = null;
+      return;
+    }
+    if (e.target.id !== 'merge-confirm' || !compare) return;
+    const choice = mergeCompare.querySelector('input[name="merge-name"]:checked');
+    const name = (choice && choice.value === 'source') ? compare.source.name : compare.target.name;
+    e.target.disabled = true;
     mergeResult.textContent = 'Merging...';
-    SMT.postJSON('/api/artists/' + id + '/merge', { source_ids: [sourceId] }).then(function (r) {
-      if (r.error) { mergeResult.textContent = r.error; return; }
-      mergeResult.textContent = 'Merged. Reloading...';
+    SMT.postJSON('/api/artists/' + id + '/merge', {
+      source_ids: [compare.source.id], name: name,
+    }).then(function (r) {
+      if (r.error) { mergeResult.textContent = r.error; e.target.disabled = false; return; }
+      mergeResult.textContent = 'Merged into "' + r.name + '". Reloading...';
       setTimeout(function () { window.location.reload(); }, 800);
-    }).catch(function () { mergeResult.textContent = 'Failed.'; });
+    }).catch(function () {
+      mergeResult.textContent = 'Failed.';
+      e.target.disabled = false;
+    });
   });
 
   loadDiscography();
