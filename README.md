@@ -64,7 +64,9 @@ a PWA with a mobile-friendly UI.
   scrapes your personalised **Last.fm "coming soon" recommended** releases
   (login-only, so you paste your Last.fm session cookie in Settings), showing
   album art and the "you've scrobbled… / similar to…" context, with a one-click
-  **Track artist** button. More sources can be added later.
+  **Track artist** button. Refreshed once a day by default (configurable), and
+  Settings has **test buttons** to validate your Last.fm API key and cookie.
+  More sources can be added later.
 - **Settings page** to configure the music directory, API keys, webhook, check
   interval, and default theme.
 - **JSON API** for everything, including the upcoming-releases feeds.
@@ -220,6 +222,8 @@ Use **Send test webhook** on the Settings page to verify your endpoint.
 | POST | `/api/artists/add` | Monitor an artist from a MusicBrainz link/ID. Body `{"link": "https://musicbrainz.org/artist/<mbid>", "state": "subscribed\|notify", "types": ["album","ep","single"]}`. Creates the artist if not in the library. |
 | POST | `/api/artists/track-by-name` | Monitor an artist by name (used by Discover). Body `{"name": "Artist", "state": "subscribed\|notify"}`. |
 | GET  | `/api/discover/lastfm` | Scraped Last.fm coming-soon recommended releases. `?refresh=1` re-fetches (needs the Last.fm cookie set). |
+| GET/POST | `/api/health/lastfm-key` | Validate the configured Last.fm API key. |
+| GET/POST | `/api/health/lastfm-cookie` | Validate the configured Last.fm session cookie. |
 | POST | `/api/artists/<id>/monitor-types` | Set watched release types. Body `{"types": ["album","ep","single"]}` (non-empty subset). |
 | POST | `/api/artists/<id>/ignore` | Hide/unhide an artist. Body `{"ignored": true\|false}`. |
 | POST | `/api/artists/ignore` | Bulk hide/unhide. Body `{"ids": [...], "ignored": true\|false}`. |

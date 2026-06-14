@@ -15,7 +15,7 @@ from flask import (
     url_for,
 )
 
-from . import db, lastfm_scrape, musicbrainz, scanner, scheduler, tracker, webhooks
+from . import db, lastfm, lastfm_scrape, musicbrainz, scanner, scheduler, tracker, webhooks
 
 app = Flask(__name__)
 
@@ -982,6 +982,11 @@ def api_settings():
             value = ",".join(normalize_nav_order(value))
         elif key == "prefer_album_artist":
             value = "true" if str(value).lower() in ("true", "1", "on", "yes") else "false"
+        elif key == "discover_refresh_hours":
+            try:
+                value = str(max(int(float(value)), 1))
+            except (TypeError, ValueError):
+                value = "24"
         elif key == "musicbrainz_rate_limit_ms":
             # Clamp to >= 1000ms so we never undercut MusicBrainz's 1 req/sec.
             try:
@@ -996,6 +1001,18 @@ def api_settings():
 @app.route("/api/webhook/test", methods=["POST"])
 def api_webhook_test():
     ok, message = webhooks.send_test()
+    return jsonify({"ok": ok, "message": message})
+
+
+@app.route("/api/health/lastfm-key", methods=["GET", "POST"])
+def api_health_lastfm_key():
+    ok, message = lastfm.check_api_key()
+    return jsonify({"ok": ok, "message": message})
+
+
+@app.route("/api/health/lastfm-cookie", methods=["GET", "POST"])
+def api_health_lastfm_cookie():
+    ok, message = lastfm_scrape.check_cookie()
     return jsonify({"ok": ok, "message": message})
 
 

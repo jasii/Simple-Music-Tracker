@@ -76,6 +76,7 @@ DEFAULT_SETTINGS = {
     "music_directory": "/music",
     "lastfm_api_key": "",
     "lastfm_cookie": "",            # session cookie for scraping login-only Last.fm pages
+    "discover_refresh_hours": "24", # how often the Discover scrape is refreshed
     "webhook_url": "",
     "webhook_method": "POST",
     "webhook_headers": "",          # JSON object, one per line "Key: Value" also accepted

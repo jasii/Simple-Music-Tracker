@@ -13,6 +13,27 @@ from . import db
 
 LASTFM_BASE = "https://ws.audioscrobbler.com/2.0/"
 
+
+def check_api_key():
+    """Validate the configured Last.fm API key. Returns (ok, message)."""
+    key = (db.get_setting("lastfm_api_key") or "").strip()
+    if not key:
+        return False, "No API key set."
+    try:
+        resp = requests.get(
+            LASTFM_BASE,
+            params={"method": "auth.getToken", "api_key": key, "format": "json"},
+            timeout=6,
+        )
+        data = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        return False, f"Could not reach Last.fm: {exc}"
+    if isinstance(data, dict) and data.get("error"):
+        return False, f"Last.fm error {data['error']}: {data.get('message', '')}"
+    if isinstance(data, dict) and data.get("token"):
+        return True, "API key is valid."
+    return False, "Unexpected response from Last.fm."
+
 # Aurral's Last.fm tuning: short timeout with a couple of retries and a small
 # exponential backoff. We serialise Last.fm calls through the refresh worker, so
 # no separate concurrency limiter is needed.

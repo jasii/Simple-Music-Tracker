@@ -26,11 +26,19 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 
-CACHE_TTL = 3 * 3600  # seconds
 MAX_PAGES = 15
 
 _cache = {"at": 0.0, "items": []}
 _lock = threading.Lock()
+
+
+def _cache_ttl():
+    """Cache lifetime in seconds, from the discover_refresh_hours setting."""
+    try:
+        hours = float(db.get_setting("discover_refresh_hours") or 24)
+    except (TypeError, ValueError):
+        hours = 24
+    return max(hours, 1) * 3600
 
 
 def _headers():
@@ -113,7 +121,7 @@ def _fetch_page(page):
 def fetch_coming_soon(force=False):
     """Return (items, cached). Raises RuntimeError if no cookie is configured."""
     with _lock:
-        if not force and _cache["items"] and (time.time() - _cache["at"]) < CACHE_TTL:
+        if not force and _cache["items"] and (time.time() - _cache["at"]) < _cache_ttl():
             return list(_cache["items"]), True
 
     if not (db.get_setting("lastfm_cookie") or "").strip():
@@ -139,3 +147,20 @@ def cache_age():
     if not _cache["items"]:
         return None
     return int(time.time() - _cache["at"])
+
+
+def check_cookie():
+    """Validate the configured Last.fm cookie. Returns (ok, message)."""
+    if not (db.get_setting("lastfm_cookie") or "").strip():
+        return False, "No Last.fm cookie set."
+    try:
+        html = _fetch_page(1)
+    except requests.RequestException as exc:
+        return False, f"Could not reach Last.fm: {exc}"
+    items, _ = parse_releases(html)
+    if items:
+        return True, f"Logged in - {len(items)} releases visible."
+    lowered = html.lower()
+    if "/login" in lowered or "log in to last.fm" in lowered or "sign in" in lowered:
+        return False, "Not logged in - the cookie is missing or expired."
+    return False, "No releases found - the cookie may be invalid."

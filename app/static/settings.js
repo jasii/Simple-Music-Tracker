@@ -87,6 +87,22 @@
     });
   });
 
+  // --- test Last.fm API key / cookie (save current values first) ---
+  function wireHealthCheck(btnId, resultId, endpoint) {
+    const btn = document.getElementById(btnId);
+    const result = document.getElementById(resultId);
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      result.textContent = 'Checking...';
+      SMT.postJSON('/api/settings', collect())
+        .then(function () { return SMT.postJSON(endpoint, {}); })
+        .then(function (r) { result.textContent = (r.ok ? 'OK - ' : 'Failed - ') + (r.message || ''); })
+        .catch(function () { result.textContent = 'Check failed.'; });
+    });
+  }
+  wireHealthCheck('btn-test-key', 'key-result', '/api/health/lastfm-key');
+  wireHealthCheck('btn-test-cookie', 'cookie-result', '/api/health/lastfm-cookie');
+
   // --- import / restore from a backup file ---
   const importBtn = document.getElementById('btn-import');
   const importFile = document.getElementById('import-file');
