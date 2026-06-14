@@ -52,6 +52,8 @@ a PWA with a mobile-friendly UI.
   approach aurral uses), with cover art from the Cover Art Archive.
 - **Configurable navigation** — reorder the nav tabs and choose which page is the
   home page (what `/` opens). Defaults to **Upcoming** on first run.
+- **Configurable Upcoming tabs** — reorder and show/hide the Upcoming windows
+  (Next 24h, This week, Following week, This month, All) from Settings.
 - **Settings page** to configure the music directory, API keys, webhook, check
   interval, and default theme.
 - **JSON API** for everything, including the upcoming-releases feeds.

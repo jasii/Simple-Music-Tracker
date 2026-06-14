@@ -4,30 +4,48 @@
   const form = document.getElementById('settings-form');
   const saveResult = document.getElementById('save-result');
 
-  // --- nav order reordering ---
-  const navList = document.getElementById('nav-order-list');
-  const navOrderInput = document.getElementById('nav_order');
+  // --- reorderable lists (nav tabs + upcoming tabs) ---
+  // opts.hiddenInputId, if given, is kept in sync with the unchecked rows'
+  // keys (so a list can carry both an order and a hidden set).
+  function wireReorder(listId, orderInputId, opts) {
+    const list = document.getElementById(listId);
+    const orderInput = document.getElementById(orderInputId);
+    if (!list || !orderInput) return;
+    opts = opts || {};
+    const hiddenInput = opts.hiddenInputId ? document.getElementById(opts.hiddenInputId) : null;
 
-  function syncNavOrder() {
-    const keys = Array.from(navList.querySelectorAll('li'))
-      .map(function (li) { return li.getAttribute('data-key'); });
-    navOrderInput.value = keys.join(',');
-  }
+    function sync() {
+      const lis = Array.from(list.querySelectorAll('li'));
+      orderInput.value = lis.map(function (li) { return li.getAttribute('data-key'); }).join(',');
+      if (hiddenInput) {
+        hiddenInput.value = lis.filter(function (li) {
+          const cb = li.querySelector('input[type="checkbox"]');
+          return cb && !cb.checked;
+        }).map(function (li) { return li.getAttribute('data-key'); }).join(',');
+      }
+    }
 
-  if (navList) {
-    navList.addEventListener('click', function (e) {
+    list.addEventListener('click', function (e) {
       const li = e.target.closest('li');
       if (!li) return;
       if (e.target.classList.contains('nav-up') && li.previousElementSibling) {
-        navList.insertBefore(li, li.previousElementSibling);
-        syncNavOrder();
+        list.insertBefore(li, li.previousElementSibling);
+        sync();
       } else if (e.target.classList.contains('nav-down') && li.nextElementSibling) {
-        navList.insertBefore(li.nextElementSibling, li);
-        syncNavOrder();
+        list.insertBefore(li.nextElementSibling, li);
+        sync();
       }
     });
-    syncNavOrder();
+    if (hiddenInput) {
+      list.addEventListener('change', function (e) {
+        if (e.target.type === 'checkbox') sync();
+      });
+    }
+    sync();
   }
+
+  wireReorder('nav-order-list', 'nav_order');
+  wireReorder('upcoming-order-list', 'upcoming_tabs_order', { hiddenInputId: 'upcoming_tabs_hidden' });
 
   // Collect form values, joining repeated keys (e.g. the monitor-type
   // checkboxes) into a comma string the API understands.
