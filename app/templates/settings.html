@@ -100,6 +100,26 @@
     <input type="text" id="webhook_url" name="webhook_url"
            value="{{ settings.webhook_url }}" placeholder="https://...">
 
+    <label for="webhook_trigger">When to trigger</label>
+    <select id="webhook_trigger" name="webhook_trigger">
+      <option value="discovery" {{ 'selected' if settings.webhook_trigger != 'before_release' }}>As soon as a release is discovered</option>
+      <option value="before_release" {{ 'selected' if settings.webhook_trigger == 'before_release' }}>A set time before the release date</option>
+    </select>
+    <div class="webhook-lead" id="webhook-lead-fields">
+      <label for="webhook_lead_value">Lead time before release</label>
+      <div class="tool-row">
+        <input type="number" id="webhook_lead_value" name="webhook_lead_value"
+               min="0" step="1" value="{{ settings.webhook_lead_value }}" style="flex:0 0 6rem">
+        <select id="webhook_lead_unit" name="webhook_lead_unit">
+          {% for u in ['hours', 'days', 'weeks'] %}
+            <option value="{{ u }}" {{ 'selected' if settings.webhook_lead_unit == u }}>{{ u }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <p class="hint">e.g. 7 days before release. Use 0 to fire on the release date. The
+        background scheduler checks roughly every minute, so timing is approximate.</p>
+    </div>
+
     <label for="webhook_method">Method</label>
     <select id="webhook_method" name="webhook_method">
       {% for m in ['POST', 'PUT', 'GET'] %}
@@ -121,16 +141,14 @@
 
   <fieldset>
     <legend>Navigation &amp; home page</legend>
-    <p class="hint">Reorder the tabs with Up/Down, and pick which page opens by default (the home page).</p>
+    <p class="hint">Drag the tabs to reorder (or use Up/Down). The tab at the top is your home page.</p>
     <input type="hidden" name="nav_order" id="nav_order" value="{{ settings.nav_order }}">
     <ul class="nav-order" id="nav-order-list">
       {% for item in nav_items %}
-      <li data-key="{{ item.key }}">
-        <label class="nav-home" title="Set as home page">
-          <input type="radio" name="home_page" value="{{ item.key }}"
-            {{ 'checked' if settings.home_page == item.key }}> home
-        </label>
+      <li data-key="{{ item.key }}" draggable="true">
+        <span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>
         <span class="nav-label">{{ item.label }}</span>
+        <span class="nav-home-badge">home</span>
         <span class="nav-order-buttons">
           <button type="button" class="nav-up" title="Move up">Up</button>
           <button type="button" class="nav-down" title="Move down">Down</button>

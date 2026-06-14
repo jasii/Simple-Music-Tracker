@@ -81,6 +81,11 @@ DEFAULT_SETTINGS = {
     "webhook_method": "POST",
     "webhook_headers": "",          # JSON object, one per line "Key: Value" also accepted
     "webhook_template": "",         # JSON body template, blank = built-in default
+    # When a 'notify' webhook fires: 'discovery' = as soon as a release is found;
+    # 'before_release' = webhook_lead_value/unit before the release date.
+    "webhook_trigger": "discovery",
+    "webhook_lead_value": "0",
+    "webhook_lead_unit": "days",     # hours | days | weeks
     "check_interval_hours": "12",
     "default_theme": "dark",        # 'dark' (amoled) | 'light'
     "musicbrainz_contact": "",      # email/url used in the MusicBrainz User-Agent

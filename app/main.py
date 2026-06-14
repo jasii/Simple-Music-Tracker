@@ -134,8 +134,9 @@ def normalize_nav_order(value):
 
 
 def _home_key():
-    home = db.get_setting("home_page") or DEFAULT_HOME
-    return home if home in PAGE_DEFS else DEFAULT_HOME
+    # The home page is simply whichever tab is first in the navigation order.
+    order = normalize_nav_order(db.get_setting("nav_order"))
+    return order[0] if order else DEFAULT_HOME
 
 
 @app.context_processor
@@ -612,47 +613,79 @@ def api_track_by_name():
     return jsonify({"id": artist_id, "name": name, "subscription": state, "created": created})
 
 
-@app.route("/api/discover/lastfm")
-def api_discover_lastfm():
-    """Scraped Last.fm 'coming soon / recommended' releases. ?refresh=1 re-fetches."""
-    if not (db.get_setting("lastfm_cookie") or "").strip():
-        return jsonify({
-            "configured": False,
-            "items": [],
-            "error": "Add your Last.fm session cookie in Settings to use this.",
-        })
-    force = request.args.get("refresh") == "1"
-    try:
-        items, cached = lastfm_scrape.fetch_coming_soon(force=force)
-    except Exception as exc:  # noqa: BLE001 - surface fetch/parse problems
-        return jsonify({"configured": True, "items": [], "error": str(exc)}), 502
+# Registry of new-release discovery sources. Each has a label, a check for
+# whether it's set up, and a fetch returning (items, cached). More can be added
+# here later (other sites/feeds) and they'll appear on the Discover page.
+DISCOVER_SOURCES = {
+    "lastfm": {
+        "label": "Last.fm",
+        "configured": lambda: bool((db.get_setting("lastfm_cookie") or "").strip()),
+        "fetch": lastfm_scrape.fetch_coming_soon,
+    },
+}
 
-    # Flag which artists are already in the library / followed.
+
+def _flag_known_artists(items):
+    """Annotate each item with in_library / following flags."""
     names = {(it.get("artist") or "").lower() for it in items if it.get("artist")}
-    known = {}
-    if names:
-        conn = db.get_connection()
-        try:
-            placeholders = ",".join("?" for _ in names)
-            rows = conn.execute(
-                f"SELECT sort_name, subscription FROM artists "
-                f"WHERE sort_name IN ({placeholders})",
-                list(names),
-            ).fetchall()
-            known = {r["sort_name"]: r["subscription"] for r in rows}
-        finally:
-            conn.close()
+    if not names:
+        return
+    conn = db.get_connection()
+    try:
+        placeholders = ",".join("?" for _ in names)
+        rows = conn.execute(
+            f"SELECT sort_name, subscription FROM artists "
+            f"WHERE sort_name IN ({placeholders})",
+            list(names),
+        ).fetchall()
+        known = {r["sort_name"]: r["subscription"] for r in rows}
+    finally:
+        conn.close()
     for it in items:
         sub = known.get((it.get("artist") or "").lower())
         it["in_library"] = sub is not None
         it["following"] = sub in ("subscribed", "notify")
 
-    return jsonify({
-        "configured": True,
-        "cached": cached,
-        "count": len(items),
-        "items": items,
-    })
+
+@app.route("/api/discover/sources")
+def api_discover_sources():
+    """List the available discovery sources and whether each is configured."""
+    return jsonify({"sources": [
+        {"key": key, "label": src["label"], "configured": src["configured"]()}
+        for key, src in DISCOVER_SOURCES.items()
+    ]})
+
+
+@app.route("/api/discover/releases")
+def api_discover_releases():
+    """Merged releases from every configured discovery source. ?refresh=1 re-fetches.
+
+    Each item is tagged with its `source` / `source_label`; the response also
+    reports per-source status (configured / count / any error).
+    """
+    force = request.args.get("refresh") == "1"
+    items = []
+    sources = []
+    for key, src in DISCOVER_SOURCES.items():
+        entry = {"key": key, "label": src["label"], "configured": src["configured"](),
+                 "count": 0, "error": None}
+        if entry["configured"]:
+            try:
+                src_items, cached = src["fetch"](force=force)
+                entry["count"] = len(src_items)
+                entry["cached"] = cached
+                for it in src_items:
+                    tagged = dict(it)
+                    tagged["source"] = key
+                    tagged["source_label"] = src["label"]
+                    items.append(tagged)
+            except Exception as exc:  # noqa: BLE001
+                entry["error"] = str(exc)
+        sources.append(entry)
+
+    _flag_known_artists(items)
+    items.sort(key=lambda r: r.get("normalized_date") or "9999")
+    return jsonify({"sources": sources, "count": len(items), "items": items})
 
 
 @app.route("/api/artists/add", methods=["POST"])
@@ -987,6 +1020,15 @@ def api_settings():
                 value = str(max(int(float(value)), 1))
             except (TypeError, ValueError):
                 value = "24"
+        elif key == "webhook_trigger":
+            value = "before_release" if value == "before_release" else "discovery"
+        elif key == "webhook_lead_value":
+            try:
+                value = str(max(int(float(value)), 0))
+            except (TypeError, ValueError):
+                value = "0"
+        elif key == "webhook_lead_unit":
+            value = value if value in ("hours", "days", "weeks") else "days"
         elif key == "musicbrainz_rate_limit_ms":
             # Clamp to >= 1000ms so we never undercut MusicBrainz's 1 req/sec.
             try:
