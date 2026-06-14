@@ -1,6 +1,7 @@
 """Flask application: pages and JSON API for Simple Music Tracker."""
 
 import os
+import sqlite3
 from datetime import date, datetime, timedelta
 
 from flask import (
@@ -433,13 +434,15 @@ def api_set_mbid(artist_id):
 def api_merge_artists(artist_id):
     """Merge one or more source artists into this (target) artist.
 
-    Body: {"source_ids": [..]}. Releases and track counts move to the target;
-    the target keeps its own name, subscription, monitor types and ignore state.
+    Body: {"source_ids": [..], "name": "<optional chosen name>"}. Releases and
+    track counts move to the target, which keeps its subscription, monitor types
+    and ignore state; the resulting name is the target's unless *name* is given.
     Source artists are then deleted.
     """
     payload = request.get_json(silent=True) or {}
     source_ids = [int(i) for i in (payload.get("source_ids") or []) if str(i).isdigit()]
     source_ids = [i for i in source_ids if i != artist_id]
+    chosen_name = (payload.get("name") or "").strip()
     if not source_ids:
         return jsonify({"error": "no source artists to merge"}), 400
 
@@ -480,11 +483,25 @@ def api_merge_artists(artist_id):
                     "UPDATE artists SET mbid = ? WHERE id = ?",
                     (target_mbid, artist_id),
                 )
+            # Apply the chosen display name (sources are gone, so the only
+            # possible sort_name clash is a different artist -- ignore if so).
+            if chosen_name and chosen_name != target["name"]:
+                try:
+                    conn.execute(
+                        "UPDATE artists SET name = ?, sort_name = ? WHERE id = ?",
+                        (chosen_name, chosen_name.lower(), artist_id),
+                    )
+                except sqlite3.IntegrityError:
+                    pass
             conn.commit()
+
+            final = conn.execute(
+                "SELECT name FROM artists WHERE id = ?", (artist_id,)
+            ).fetchone()
         finally:
             conn.close()
 
-    return jsonify({"id": artist_id, "merged": merged})
+    return jsonify({"id": artist_id, "merged": merged, "name": final["name"]})
 
 
 @app.route("/api/artists/<int:artist_id>/discography")
