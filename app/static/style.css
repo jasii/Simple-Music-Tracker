@@ -306,6 +306,37 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
   .cal-event { font-size: 0.65rem; }
 }
 
+/* Discover */
+.discover-section { margin-top: 1rem; }
+.discover-head { display: flex; align-items: center; gap: 0.8rem; }
+.discover-head h2 { margin: 0; flex: 1; }
+.discover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: 0.8rem;
+  margin-top: 0.6rem;
+}
+.discover-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.discover-card img, .discover-noart {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  background: var(--row-hover);
+  display: block;
+}
+.discover-body { padding: 0.5rem 0.6rem; display: flex; flex-direction: column; gap: 0.2rem; }
+.discover-album { font-weight: 600; }
+.discover-artist { font-size: 0.95rem; }
+.discover-context { font-size: 0.8rem; }
+.discover-actions { margin-top: 0.4rem; }
+.discover-track { padding: 0.2rem 0.5rem; font-size: 0.85rem; }
+
 /* Settings */
 .settings-form fieldset {
   border: 1px solid var(--line);

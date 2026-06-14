@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS scan_log (
 DEFAULT_SETTINGS = {
     "music_directory": "/music",
     "lastfm_api_key": "",
+    "lastfm_cookie": "",            # session cookie for scraping login-only Last.fm pages
     "webhook_url": "",
     "webhook_method": "POST",
     "webhook_headers": "",          # JSON object, one per line "Key: Value" also accepted
@@ -86,7 +87,7 @@ DEFAULT_SETTINGS = {
     "musicbrainz_rate_limit_ms": "1000",   # min gap between MusicBrainz requests (matches aurral)
     "discography_autohide": "",             # categories collapsed by default on artist pages
     "home_page": "upcoming",                # which page '/' opens (Upcoming on first run)
-    "nav_order": "artists,following,upcoming,ignored,settings",
+    "nav_order": "artists,following,upcoming,discover,ignored,settings",
     "prefer_album_artist": "true",          # use the album-artist tag before the track artist
 }
 
