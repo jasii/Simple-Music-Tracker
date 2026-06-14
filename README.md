@@ -52,8 +52,9 @@ a PWA with a mobile-friendly UI.
   approach aurral uses), with cover art from the Cover Art Archive.
 - **Configurable navigation** — reorder the nav tabs and choose which page is the
   home page (what `/` opens). Defaults to **Upcoming** on first run.
-- **Configurable Upcoming tabs** — reorder and show/hide the Upcoming windows
-  (Next 24h, This week, Following week, This month, All) from Settings.
+- **Upcoming agenda & calendar** — the Upcoming page offers a week-by-week
+  **agenda** view (grouped This week / Next week / by date range) and a month
+  **calendar** grid you can page through, with releases placed on their dates.
 - **Settings page** to configure the music directory, API keys, webhook, check
   interval, and default theme.
 - **JSON API** for everything, including the upcoming-releases feeds.
@@ -218,6 +219,7 @@ Use **Send test webhook** on the Settings page to verify your endpoint.
 | POST | `/api/artists/<id>/refresh` | Re-fetch one artist's info/releases now. |
 | GET  | `/api/subscriptions` | All followed artists. |
 | GET  | `/api/upcoming` | Upcoming releases. Param `window`: `day`, `week`, `next-week`, `month`, `all`. |
+| GET  | `/api/upcoming/releases` | Releases in a date range (powers the agenda/calendar). Params `from`, `to` (`YYYY-MM-DD`). |
 | POST | `/api/scan` | Start a library scan. Body `{"quick": true}` for an incremental sync of only added/changed files. |
 | GET  | `/api/scan/status` | Scan progress. |
 | POST | `/api/refresh` | Refresh all followed artists. |
