@@ -45,7 +45,6 @@
   }
 
   wireReorder('nav-order-list', 'nav_order');
-  wireReorder('upcoming-order-list', 'upcoming_tabs_order', { hiddenInputId: 'upcoming_tabs_hidden' });
 
   // Collect form values, joining repeated keys (e.g. the monitor-type
   // checkboxes) into a comma string the API understands.

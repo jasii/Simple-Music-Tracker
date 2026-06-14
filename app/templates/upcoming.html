@@ -5,14 +5,27 @@
 <h1>Upcoming Releases</h1>
 <p class="muted">New and upcoming albums from artists you follow.</p>
 
-<div class="tabs" id="window-tabs">
-  {% for tab in upcoming_tabs %}
-  <button data-window="{{ tab.key }}" class="{{ 'on' if loop.first }}">{{ tab.label }}</button>
-  {% endfor %}
+<div class="tabs" id="view-toggle">
+  <button data-view="agenda" class="on">Agenda</button>
+  <button data-view="calendar">Calendar</button>
 </div>
 
-<div id="upcoming-list" class="release-list">
-  <p class="muted">Loading...</p>
+<div id="agenda-view">
+  <div id="agenda-list" class="agenda">
+    <p class="muted">Loading...</p>
+  </div>
+</div>
+
+<div id="calendar-view" hidden>
+  <div class="cal-header">
+    <button id="cal-prev" type="button" title="Previous month">&larr;</button>
+    <span id="cal-title" class="cal-title"></span>
+    <button id="cal-next" type="button" title="Next month">&rarr;</button>
+    <button id="cal-today" type="button">Today</button>
+  </div>
+  <div id="calendar" class="calendar">
+    <p class="muted">Loading...</p>
+  </div>
 </div>
 {% endblock %}
 

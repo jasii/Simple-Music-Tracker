@@ -232,6 +232,63 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
 .tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.8rem 0; }
 .tabs button.on { font-weight: 700; border-color: var(--fg); }
 
+/* Agenda (week by week) */
+.agenda-week { margin-bottom: 1.4rem; }
+.agenda-head {
+  margin: 0 0 0.5rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 1rem;
+}
+.agenda-rel { font-weight: 700; }
+
+/* Calendar */
+.cal-header { display: flex; align-items: center; gap: 0.6rem; margin: 0.4rem 0 0.8rem; }
+.cal-title { font-weight: 700; min-width: 10rem; }
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+.cal-dow {
+  background: var(--bg);
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.8rem;
+  padding: 0.3rem 0;
+  color: var(--muted);
+}
+.cal-cell {
+  background: var(--bg);
+  min-height: 5.5rem;
+  padding: 0.2rem 0.25rem;
+  font-size: 0.8rem;
+  overflow: hidden;
+}
+.cal-cell.cal-out { background: var(--row-hover); color: var(--muted); }
+.cal-cell.cal-today { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cal-day { font-weight: 600; margin-bottom: 0.15rem; }
+.cal-event {
+  display: block;
+  background: var(--row-hover);
+  border-left: 2px solid var(--accent);
+  border-radius: 2px;
+  padding: 0.05rem 0.2rem;
+  margin-bottom: 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+.cal-event:hover { text-decoration: none; background: var(--line); }
+
+@media (max-width: 600px) {
+  .cal-cell { min-height: 3.5rem; font-size: 0.7rem; }
+  .cal-event { font-size: 0.65rem; }
+}
+
 /* Settings */
 .settings-form fieldset {
   border: 1px solid var(--line);

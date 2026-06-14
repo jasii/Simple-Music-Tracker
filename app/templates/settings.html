@@ -115,27 +115,6 @@
   </fieldset>
 
   <fieldset>
-    <legend>Upcoming page tabs</legend>
-    <p class="hint">Reorder the Upcoming tabs with Up/Down, and untick any you want to hide.</p>
-    <input type="hidden" name="upcoming_tabs_order" id="upcoming_tabs_order" value="{{ settings.upcoming_tabs_order }}">
-    <input type="hidden" name="upcoming_tabs_hidden" id="upcoming_tabs_hidden" value="{{ settings.upcoming_tabs_hidden }}">
-    <ul class="nav-order" id="upcoming-order-list">
-      {% for tab in upcoming_tab_rows %}
-      <li data-key="{{ tab.key }}">
-        <label class="nav-home" title="Show this tab">
-          <input type="checkbox" class="upcoming-show" {{ 'checked' if tab.visible }}> show
-        </label>
-        <span class="nav-label">{{ tab.label }}</span>
-        <span class="nav-order-buttons">
-          <button type="button" class="nav-up" title="Move up">Up</button>
-          <button type="button" class="nav-down" title="Move down">Down</button>
-        </span>
-      </li>
-      {% endfor %}
-    </ul>
-  </fieldset>
-
-  <fieldset>
     <legend>Appearance</legend>
     <label for="default_theme">Default theme</label>
     <select id="default_theme" name="default_theme">

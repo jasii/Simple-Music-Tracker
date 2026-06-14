@@ -111,16 +111,6 @@ PAGE_DEFS = {
 PAGE_KEYS = list(PAGE_DEFS)
 DEFAULT_HOME = "upcoming"
 
-# Upcoming-page tab key -> label. Keys match the /api/upcoming window values.
-UPCOMING_TABS = {
-    "day": "Next 24h",
-    "week": "This week",
-    "next-week": "Following week",
-    "month": "This month",
-    "all": "All",
-}
-UPCOMING_KEYS = list(UPCOMING_TABS)
-
 
 def _ordered_subset(value, keys):
     """Return *value* (a comma string) ordered to valid *keys*, all present."""
@@ -138,36 +128,6 @@ def _ordered_subset(value, keys):
 def normalize_nav_order(value):
     """Return a valid, de-duplicated page order with every page present."""
     return _ordered_subset(value, PAGE_KEYS)
-
-
-def normalize_upcoming_order(value):
-    return _ordered_subset(value, UPCOMING_KEYS)
-
-
-def _clean_keys(value, keys):
-    """Return the subset of *keys* present in *value* (comma string or list)."""
-    if isinstance(value, str):
-        items = [v.strip() for v in value.split(",")]
-    else:
-        items = [str(v).strip() for v in (value or [])]
-    return [k for k in keys if k in items]
-
-
-def upcoming_all_tabs():
-    """Every upcoming tab in order, with a 'visible' flag (for settings)."""
-    order = normalize_upcoming_order(db.get_setting("upcoming_tabs_order"))
-    hidden = set(_clean_keys(db.get_setting("upcoming_tabs_hidden"), UPCOMING_KEYS))
-    return [
-        {"key": k, "label": UPCOMING_TABS[k], "visible": k not in hidden}
-        for k in order
-    ]
-
-
-def upcoming_visible_tabs():
-    """Visible upcoming tabs in order (falls back to all if none visible)."""
-    tabs = [t for t in upcoming_all_tabs() if t["visible"]]
-    return tabs or [{"key": k, "label": UPCOMING_TABS[k]} for k in
-                    normalize_upcoming_order(db.get_setting("upcoming_tabs_order"))]
 
 
 def _home_key():
@@ -206,9 +166,7 @@ def subscriptions_page():
 
 @app.route("/upcoming")
 def upcoming_page():
-    ctx = _base_context(active="upcoming")
-    ctx["upcoming_tabs"] = upcoming_visible_tabs()
-    return render_template("upcoming.html", **ctx)
+    return render_template("upcoming.html", **_base_context(active="upcoming"))
 
 
 @app.route("/ignored")
@@ -238,7 +196,6 @@ def settings_page():
     ctx = _base_context(active="settings")
     ctx["settings"] = db.get_all_settings()
     ctx["default_webhook_template"] = webhooks.DEFAULT_TEMPLATE
-    ctx["upcoming_tab_rows"] = upcoming_all_tabs()
     return render_template("settings.html", **ctx)
 
 
@@ -805,6 +762,55 @@ def api_upcoming():
     return jsonify({"window": window, "count": len(items), "releases": items})
 
 
+@app.route("/api/upcoming/releases")
+def api_upcoming_releases():
+    """Releases for followed artists within an explicit date range.
+
+    Params: from=YYYY-MM-DD (default today), to=YYYY-MM-DD (default +366 days).
+    Powers the agenda (week-by-week) and calendar views. Includes past dates
+    when the range asks for them (so a calendar month grid can be filled).
+    """
+    today = date.today()
+
+    def _parse(arg, fallback):
+        try:
+            return datetime.strptime(arg, "%Y-%m-%d").date() if arg else fallback
+        except ValueError:
+            return fallback
+
+    start = _parse(request.args.get("from"), today)
+    end = _parse(request.args.get("to"), today + timedelta(days=366))
+
+    conn = db.get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT r.*, a.name AS artist_name, a.id AS artist_id, "
+            "a.subscription AS subscription "
+            "FROM releases r JOIN artists a ON a.id = r.artist_id "
+            "WHERE a.subscription IN ('subscribed', 'notify') "
+            "ORDER BY r.release_date"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    items = []
+    for row in rows:
+        nd = _normalize_date(row["release_date"])
+        if nd is None or nd < start or nd > end:
+            continue
+        item = _row_to_dict(row)
+        item["normalized_date"] = nd.isoformat()
+        item["days_until"] = (nd - today).days
+        items.append(item)
+    items.sort(key=lambda r: r["normalized_date"])
+    return jsonify({
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "count": len(items),
+        "releases": items,
+    })
+
+
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
     """Start a library scan. Body: {"quick": true} for an incremental sync."""
@@ -861,10 +867,6 @@ def api_settings():
             value = value if value in PAGE_DEFS else DEFAULT_HOME
         elif key == "nav_order":
             value = ",".join(normalize_nav_order(value))
-        elif key == "upcoming_tabs_order":
-            value = ",".join(normalize_upcoming_order(value))
-        elif key == "upcoming_tabs_hidden":
-            value = ",".join(_clean_keys(value, UPCOMING_KEYS))
         elif key == "musicbrainz_rate_limit_ms":
             # Clamp to >= 1000ms so we never undercut MusicBrainz's 1 req/sec.
             try:
