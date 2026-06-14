@@ -1,0 +1,22 @@
+# Example: run the pre-built image pulled from the GitHub Container Registry.
+#
+#   1. Replace the music path below with your library directory.
+#   2. Run:  docker compose -f docker-compose.example.yml up -d
+#   3. Open: http://localhost:8080
+#
+# Update later with:  docker compose -f docker-compose.example.yml pull && \
+#                     docker compose -f docker-compose.example.yml up -d
+services:
+  music-tracker:
+    image: ghcr.io/jasii/simple-music-tracker:latest
+    container_name: simple-music-tracker
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persist the SQLite database on the host.
+      - ./data:/data
+      # Mount your music library read-only. Change the left side to your path.
+      - /path/to/your/music:/music:ro
+    environment:
+      - SMT_DB_PATH=/data/tracker.db
+    restart: unless-stopped

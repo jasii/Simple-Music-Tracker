@@ -1,5 +1,10 @@
 FROM python:3.11-slim
 
+# Link the published GHCR package back to the source repository.
+LABEL org.opencontainers.image.source="https://github.com/jasii/simple-music-tracker" \
+      org.opencontainers.image.description="Simple Music Tracker - artist library and upcoming release tracker" \
+      org.opencontainers.image.licenses="MIT"
+
 # Avoid .pyc files and buffer issues; keep logs flowing in Docker.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

@@ -41,7 +41,54 @@ Only checks artists you **follow** — with ~3000 artists, MusicBrainz's ~1 req/
 rate limit makes a full-library sweep impractical, so tracking is scoped to your
 subscriptions.
 
-## Run with Docker
+## Run the pre-built image (pull from GitHub)
+
+A GitHub Actions workflow builds a multi-arch image (`linux/amd64` + `linux/arm64`)
+and publishes it to the **GitHub Container Registry** on every push to the
+default branch and every `vX.Y.Z` tag. Available tags:
+
+- `ghcr.io/jasii/simple-music-tracker:latest` — newest default-branch build
+- `ghcr.io/jasii/simple-music-tracker:v1.2.3` — a specific release tag
+
+Pull and run it directly:
+
+```bash
+docker run -d -p 8080:8080 \
+  -v "$(pwd)/data:/data" \
+  -v "/path/to/your/music:/music:ro" \
+  --name simple-music-tracker \
+  ghcr.io/jasii/simple-music-tracker:latest
+```
+
+Or use the provided [`docker-compose.example.yml`](docker-compose.example.yml)
+(edit the music path first):
+
+```bash
+docker compose -f docker-compose.example.yml up -d
+# update later:
+docker compose -f docker-compose.example.yml pull
+docker compose -f docker-compose.example.yml up -d
+```
+
+Then open <http://localhost:8080>.
+
+### Publishing your own image
+
+The workflow at `.github/workflows/docker-publish.yml` runs automatically once
+the code is on your default branch. To publish:
+
+1. Merge to `main` (or push a tag like `v1.0.0`), or trigger it manually from the
+   repo's **Actions** tab (it supports `workflow_dispatch` on any branch).
+2. The first successful run creates the package under your repo's **Packages**.
+   If you want anyone to pull without authenticating, open the package settings
+   and set its visibility to **Public**.
+3. Pulling a private package requires a GitHub token with `read:packages`:
+   `echo $TOKEN | docker login ghcr.io -u <username> --password-stdin`.
+
+No secrets are needed for publishing — the workflow uses the built-in
+`GITHUB_TOKEN` with `packages: write` permission.
+
+## Build and run with Docker (local source)
 
 1. Edit `docker-compose.yml` and point the music volume at your library:
 
