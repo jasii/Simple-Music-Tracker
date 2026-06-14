@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS artists (
     bio           TEXT,
     -- 'none' | 'subscribed' | 'notify'
     subscription  TEXT NOT NULL DEFAULT 'none',
+    -- comma separated subset of 'album,ep,single' to watch for this artist
+    monitor_types TEXT NOT NULL DEFAULT 'album,ep',
     track_count   INTEGER NOT NULL DEFAULT 0,
     last_checked  TEXT,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -78,7 +80,36 @@ DEFAULT_SETTINGS = {
     "check_interval_hours": "12",
     "default_theme": "dark",        # 'dark' (amoled) | 'light'
     "musicbrainz_contact": "",      # email/url used in the MusicBrainz User-Agent
+    "default_monitor_types": "album,ep",   # applied to newly followed artists
+    "musicbrainz_rate_limit_ms": "1000",   # min gap between MusicBrainz requests (matches aurral)
 }
+
+# Release types that may be monitored. Order is the display order.
+MONITOR_TYPE_OPTIONS = ["album", "ep", "single"]
+
+
+def _migrate(conn):
+    """Apply lightweight, idempotent schema migrations for existing databases."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(artists)")}
+    if "monitor_types" not in cols:
+        conn.execute(
+            "ALTER TABLE artists ADD COLUMN monitor_types TEXT NOT NULL "
+            "DEFAULT 'album,ep'"
+        )
+
+
+def normalize_monitor_types(value):
+    """Return a clean, ordered comma string from a list or comma string."""
+    if isinstance(value, str):
+        items = [v.strip().lower() for v in value.split(",")]
+    else:
+        items = [str(v).strip().lower() for v in (value or [])]
+    chosen = [t for t in MONITOR_TYPE_OPTIONS if t in items]
+    # Never allow an empty selection -- fall back to the global default.
+    if not chosen:
+        chosen = [t for t in MONITOR_TYPE_OPTIONS
+                  if t in DEFAULT_SETTINGS["default_monitor_types"].split(",")]
+    return ",".join(chosen) or "album,ep"
 
 
 def get_connection():
@@ -95,6 +126,7 @@ def init_db():
     conn = get_connection()
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         # Seed any missing default settings without clobbering existing values.
         for key, value in DEFAULT_SETTINGS.items():
             conn.execute(

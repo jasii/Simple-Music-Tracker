@@ -20,6 +20,13 @@ a PWA with a mobile-friendly UI.
     tracked.
   - *Subscribe + Notify* — same as above, plus a webhook fires when a new release
     is detected.
+- **Per-artist release-type selection** — choose any combination of **Albums**,
+  **EPs**, and **Singles** to watch for each artist (set a default for new
+  follows in Settings).
+- **Built-in rate limiting** — every external lookup runs through a single
+  background worker, so even bulk-subscribing thousands of artists makes requests
+  one at a time, paced under MusicBrainz's limits (configurable, with automatic
+  backoff on 429/503). No risk of getting your instance blocked.
 - **Upcoming releases** for followed artists, grouped by window: next 24h, this
   week, the following week, this month, or all.
 - **Artist info** (bio, image, link) from the **Last.fm** API.
@@ -34,7 +41,54 @@ Only checks artists you **follow** — with ~3000 artists, MusicBrainz's ~1 req/
 rate limit makes a full-library sweep impractical, so tracking is scoped to your
 subscriptions.
 
-## Run with Docker
+## Run the pre-built image (pull from GitHub)
+
+A GitHub Actions workflow builds a multi-arch image (`linux/amd64` + `linux/arm64`)
+and publishes it to the **GitHub Container Registry** on every push to the
+default branch and every `vX.Y.Z` tag. Available tags:
+
+- `ghcr.io/jasii/simple-music-tracker:latest` — newest default-branch build
+- `ghcr.io/jasii/simple-music-tracker:v1.2.3` — a specific release tag
+
+Pull and run it directly:
+
+```bash
+docker run -d -p 8080:8080 \
+  -v "$(pwd)/data:/data" \
+  -v "/path/to/your/music:/music:ro" \
+  --name simple-music-tracker \
+  ghcr.io/jasii/simple-music-tracker:latest
+```
+
+Or use the provided [`docker-compose.example.yml`](docker-compose.example.yml)
+(edit the music path first):
+
+```bash
+docker compose -f docker-compose.example.yml up -d
+# update later:
+docker compose -f docker-compose.example.yml pull
+docker compose -f docker-compose.example.yml up -d
+```
+
+Then open <http://localhost:8080>.
+
+### Publishing your own image
+
+The workflow at `.github/workflows/docker-publish.yml` runs automatically once
+the code is on your default branch. To publish:
+
+1. Merge to `main` (or push a tag like `v1.0.0`), or trigger it manually from the
+   repo's **Actions** tab (it supports `workflow_dispatch` on any branch).
+2. The first successful run creates the package under your repo's **Packages**.
+   If you want anyone to pull without authenticating, open the package settings
+   and set its visibility to **Public**.
+3. Pulling a private package requires a GitHub token with `read:packages`:
+   `echo $TOKEN | docker login ghcr.io -u <username> --password-stdin`.
+
+No secrets are needed for publishing — the workflow uses the built-in
+`GITHUB_TOKEN` with `packages: write` permission.
+
+## Build and run with Docker (local source)
 
 1. Edit `docker-compose.yml` and point the music volume at your library:
 
@@ -77,6 +131,11 @@ The SQLite database is stored in the `/data` volume so it survives restarts.
 2. On the **Artists** page, click **Scan library**. Progress shows live.
 3. Subscribe to artists (checkboxes). Subscribing triggers an immediate metadata
    fetch; after that, a background job re-checks on the configured interval.
+
+You can also **monitor an artist that isn't in your library** by pasting a
+MusicBrainz artist link (e.g. `https://musicbrainz.org/artist/<mbid>`) or a raw
+artist ID into the "Monitor an artist by MusicBrainz link" box on the Artists
+page. The artist is looked up on MusicBrainz, added, and followed immediately.
 
 ## Run locally (without Docker)
 
@@ -123,6 +182,8 @@ Use **Send test webhook** on the Settings page to verify your endpoint.
 | GET  | `/api/artists` | List artists. Params: `q`, `subscription` (`none\|subscribed\|notify\|following`), `sort` (`name\|tracks\|recent`), `limit`, `offset`. |
 | GET  | `/api/artists/<id>` | Artist detail with tracked releases. |
 | POST | `/api/artists/<id>/subscription` | Body `{"state": "none\|subscribed\|notify"}`. |
+| POST | `/api/artists/add` | Monitor an artist from a MusicBrainz link/ID. Body `{"link": "https://musicbrainz.org/artist/<mbid>", "state": "subscribed\|notify", "types": ["album","ep","single"]}`. Creates the artist if not in the library. |
+| POST | `/api/artists/<id>/monitor-types` | Set watched release types. Body `{"types": ["album","ep","single"]}` (non-empty subset). |
 | POST | `/api/artists/subscriptions` | Bulk: `{"ids": [...], "state": "..."}`. |
 | POST | `/api/artists/<id>/refresh` | Re-fetch one artist's info/releases now. |
 | GET  | `/api/subscriptions` | All followed artists. |
@@ -152,8 +213,30 @@ For each followed artist the app:
    last 30 days, and stores them.
 4. Cover art is linked from the Cover Art Archive.
 
-MusicBrainz requests are globally rate-limited to ~1/sec with a descriptive
-User-Agent, per their guidelines.
+Each artist is checked only for the release types you selected (Albums / EPs /
+Singles).
+
+## Rate limiting
+
+All MusicBrainz/Last.fm work is funneled through a **single background worker**
+draining a job queue, so no matter how many artists you bulk-subscribe, requests
+are made one at a time rather than fanning out into thousands of concurrent
+calls. This is the equivalent of aurral's MusicBrainz limiter
+(`maxConcurrent: 1, minTime: 1000`).
+
+- **MusicBrainz**: globally paced with a configurable minimum gap (default and
+  floor `1000ms`, i.e. 1 request/second, matching aurral), a descriptive
+  User-Agent, and retries with exponential backoff (`300ms · 2^n`, honoring any
+  `Retry-After` header) on transient connection errors and `429`/`500`/`502`/
+  `503`/`504`. A `404` is treated as "not found" and not retried.
+- **Last.fm**: a 6s timeout with up to 2 retries and small backoff (aurral's
+  values). Calls are serialized through the same worker, so no separate
+  concurrency limiter is needed.
+
+Compared with aurral we deliberately skip its short-TTL response cache (we
+persist MusicBrainz IDs in the database and only refresh on a long interval, so
+repeat lookups are rare) and its multi-provider failover/health-probe machinery
+(out of scope for a single-instance app).
 
 ## Tech
 

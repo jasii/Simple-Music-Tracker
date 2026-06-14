@@ -22,6 +22,17 @@
         {{ 'checked' if artist.subscription == 'notify' }}> Subscribe + Notify</label>
       <button id="btn-refresh-artist" type="button">Refresh now</button>
     </div>
+    <div class="monitor-types" id="monitor-types">
+      <span class="muted">Monitor:</span>
+      {% set watched = (artist.monitor_types or 'album,ep').split(',') %}
+      <label><input type="checkbox" class="mtype" value="album"
+        {{ 'checked' if 'album' in watched }}> Albums</label>
+      <label><input type="checkbox" class="mtype" value="ep"
+        {{ 'checked' if 'ep' in watched }}> EPs</label>
+      <label><input type="checkbox" class="mtype" value="single"
+        {{ 'checked' if 'single' in watched }}> Singles</label>
+      <span id="mtype-result" class="muted"></span>
+    </div>
     {% if artist.lastfm_url %}<p><a href="{{ artist.lastfm_url }}" target="_blank" rel="noopener">Last.fm</a></p>{% endif %}
   </div>
 </div>

@@ -13,13 +13,14 @@ from flask import (
     url_for,
 )
 
-from . import db, scanner, scheduler, tracker, webhooks
+from . import db, musicbrainz, scanner, scheduler, tracker, webhooks
 
 app = Flask(__name__)
 
 # Initialise database and start the background scheduler at import time so it
 # works under any WSGI server as well as the built-in dev server.
 db.init_db()
+tracker.start_worker()
 scheduler.start()
 
 VALID_STATES = {"none", "subscribed", "notify"}
@@ -277,9 +278,121 @@ def api_set_subscription(artist_id):
 
     # Newly following an artist? Kick off a metadata fetch in the background.
     if state in ("subscribed", "notify"):
-        tracker.refresh_artist_in_background(artist_id)
+        tracker.enqueue_artist(artist_id)
 
     return jsonify({"id": artist_id, "subscription": state})
+
+
+@app.route("/api/artists/<int:artist_id>/monitor-types", methods=["POST"])
+def api_set_monitor_types(artist_id):
+    """Set which release types to watch for an artist.
+
+    Body: {"types": ["album", "ep", "single"]} (any non-empty subset).
+    Releases of types no longer monitored are dropped, then a refresh is queued.
+    """
+    payload = request.get_json(silent=True) or {}
+    types = payload.get("types")
+    if types is None:
+        types = request.form.getlist("types")
+    monitor_types = db.normalize_monitor_types(types)
+    kept = monitor_types.split(",")
+
+    with db._write_lock:
+        conn = db.get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE artists SET monitor_types = ? WHERE id = ?",
+                (monitor_types, artist_id),
+            )
+            if cur.rowcount:
+                # Drop stored releases whose type is no longer monitored.
+                labels = [t.capitalize() if t != "ep" else "EP" for t in kept]
+                placeholders = ",".join("?" for _ in labels)
+                conn.execute(
+                    f"DELETE FROM releases WHERE artist_id = ? "
+                    f"AND primary_type NOT IN ({placeholders})",
+                    [artist_id, *labels],
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        if cur.rowcount == 0:
+            return jsonify({"error": "artist not found"}), 404
+
+    tracker.enqueue_artist(artist_id)
+    return jsonify({"id": artist_id, "monitor_types": kept})
+
+
+@app.route("/api/artists/add", methods=["POST"])
+def api_add_artist():
+    """Start monitoring an artist from a pasted MusicBrainz link (or raw MBID).
+
+    Body: {"link": "https://musicbrainz.org/artist/<mbid>", "state": "subscribed"}.
+    Creates the artist if it isn't already in the library (track_count 0), sets
+    the subscription, and kicks off a metadata fetch.
+    """
+    payload = request.get_json(silent=True) or {}
+    link = payload.get("link") or payload.get("mbid") or payload.get("url") or ""
+    state = payload.get("state") or "subscribed"
+    if state not in ("subscribed", "notify"):
+        return jsonify({"error": "state must be 'subscribed' or 'notify'"}), 400
+
+    mbid = musicbrainz.extract_mbid(link)
+    if not mbid:
+        return jsonify({"error": "no MusicBrainz artist id found in that link"}), 400
+
+    # Release types to monitor; default to the configured global default.
+    if payload.get("types"):
+        monitor_types = db.normalize_monitor_types(payload["types"])
+    else:
+        monitor_types = db.normalize_monitor_types(
+            db.get_setting("default_monitor_types")
+        )
+
+    # Look up the canonical name from MusicBrainz.
+    info = musicbrainz.lookup_artist(mbid)
+    if not info:
+        return jsonify({"error": "artist not found on MusicBrainz"}), 404
+
+    with db._write_lock:
+        conn = db.get_connection()
+        try:
+            # Match an existing row by MBID first, then by name.
+            existing = conn.execute(
+                "SELECT id FROM artists WHERE mbid = ? OR sort_name = ?",
+                (mbid, info["name"].lower()),
+            ).fetchone()
+            if existing:
+                artist_id = existing["id"]
+                conn.execute(
+                    "UPDATE artists SET subscription = ?, monitor_types = ?, "
+                    "mbid = COALESCE(mbid, ?) WHERE id = ?",
+                    (state, monitor_types, mbid, artist_id),
+                )
+                created = False
+            else:
+                cur = conn.execute(
+                    "INSERT INTO artists (name, sort_name, mbid, subscription, "
+                    "monitor_types, track_count) VALUES (?, ?, ?, ?, ?, 0)",
+                    (info["name"], info["name"].lower(), mbid, state, monitor_types),
+                )
+                artist_id = cur.lastrowid
+                created = True
+            conn.commit()
+        finally:
+            conn.close()
+
+    tracker.enqueue_artist(artist_id)
+    return jsonify(
+        {
+            "id": artist_id,
+            "name": info["name"],
+            "mbid": mbid,
+            "subscription": state,
+            "monitor_types": monitor_types.split(","),
+            "created": created,
+        }
+    )
 
 
 @app.route("/api/artists/subscriptions", methods=["POST"])
@@ -311,7 +424,7 @@ def api_bulk_subscription():
 
     if state in ("subscribed", "notify"):
         for artist_id in ids:
-            tracker.refresh_artist_in_background(artist_id)
+            tracker.enqueue_artist(artist_id)
 
     return jsonify({"updated": len(ids), "state": state})
 
@@ -387,16 +500,13 @@ def api_scan_status():
 
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
-    state = tracker.get_refresh_state()
-    if state.get("running"):
-        return jsonify({"error": "refresh already running", "state": state}), 409
-    tracker.refresh_all_in_background()
-    return jsonify({"started": True})
+    queued = tracker.enqueue_all_subscribed()
+    return jsonify({"started": True, "queued": queued})
 
 
 @app.route("/api/artists/<int:artist_id>/refresh", methods=["POST"])
 def api_refresh_artist(artist_id):
-    tracker.refresh_artist_in_background(artist_id)
+    tracker.enqueue_artist(artist_id)
     return jsonify({"started": True, "id": artist_id})
 
 
@@ -416,9 +526,18 @@ def api_settings():
     allowed = set(db.DEFAULT_SETTINGS.keys())
     updated = {}
     for key, value in payload.items():
-        if key in allowed:
-            db.set_setting(key, str(value))
-            updated[key] = value
+        if key not in allowed:
+            continue
+        if key == "default_monitor_types":
+            value = db.normalize_monitor_types(value)
+        elif key == "musicbrainz_rate_limit_ms":
+            # Clamp to >= 1000ms so we never undercut MusicBrainz's 1 req/sec.
+            try:
+                value = str(max(int(float(value)), 1000))
+            except (TypeError, ValueError):
+                value = "1100"
+        db.set_setting(key, str(value))
+        updated[key] = value
     return jsonify({"updated": updated})
 
 

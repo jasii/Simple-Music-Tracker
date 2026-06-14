@@ -5,11 +5,36 @@ serving real artist images through the API (they return a placeholder star),
 so callers should treat the image as best-effort and fall back to album art.
 """
 
+import time
+
 import requests
 
 from . import db
 
 LASTFM_BASE = "https://ws.audioscrobbler.com/2.0/"
+
+# Aurral's Last.fm tuning: short timeout with a couple of retries and a small
+# exponential backoff. We serialise Last.fm calls through the refresh worker, so
+# no separate concurrency limiter is needed.
+_TIMEOUT_S = 6
+_MAX_RETRIES = 2
+
+
+def _lastfm_get(params):
+    """GET the Last.fm API with retries/backoff. Returns parsed JSON or None."""
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            resp = requests.get(LASTFM_BASE, params=params, timeout=_TIMEOUT_S)
+            # Retry transient server errors; otherwise use what we got.
+            if resp.status_code in (429, 500, 502, 503, 504):
+                raise requests.HTTPError(response=resp)
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.RequestException, ValueError):
+            if attempt >= _MAX_RETRIES:
+                return None
+            time.sleep(0.3 * (2 ** attempt) + attempt * 0.2)
+    return None
 
 
 def _placeholder(url):
@@ -22,21 +47,16 @@ def get_artist_info(name):
     api_key = db.get_setting("lastfm_api_key")
     if not api_key:
         return {}
-    try:
-        resp = requests.get(
-            LASTFM_BASE,
-            params={
-                "method": "artist.getinfo",
-                "artist": name,
-                "api_key": api_key,
-                "format": "json",
-                "autocorrect": 1,
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except (requests.RequestException, ValueError):
+    data = _lastfm_get(
+        {
+            "method": "artist.getinfo",
+            "artist": name,
+            "api_key": api_key,
+            "format": "json",
+            "autocorrect": 1,
+        }
+    )
+    if not data:
         return {}
 
     artist = data.get("artist")

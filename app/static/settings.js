@@ -4,10 +4,21 @@
   const form = document.getElementById('settings-form');
   const saveResult = document.getElementById('save-result');
 
+  // Collect form values, joining repeated keys (e.g. the monitor-type
+  // checkboxes) into a comma string the API understands.
+  function collect() {
+    const data = {};
+    new FormData(form).forEach(function (value, key) {
+      data[key] = key in data ? data[key] + ',' + value : value;
+    });
+    // Ensure the checkbox group is always sent, even when fully unchecked.
+    if (!('default_monitor_types' in data)) data.default_monitor_types = '';
+    return data;
+  }
+
   form.addEventListener('submit', function (e) {
     e.preventDefault();
-    const data = {};
-    new FormData(form).forEach(function (value, key) { data[key] = value; });
+    const data = collect();
     saveResult.textContent = 'Saving...';
     SMT.postJSON('/api/settings', data).then(function () {
       saveResult.textContent = 'Saved.';
@@ -22,9 +33,7 @@
   testBtn.addEventListener('click', function () {
     webhookResult.textContent = 'Sending...';
     // Save first so the test uses current values.
-    const data = {};
-    new FormData(form).forEach(function (value, key) { data[key] = value; });
-    SMT.postJSON('/api/settings', data).then(function () {
+    SMT.postJSON('/api/settings', collect()).then(function () {
       return SMT.postJSON('/api/webhook/test', {});
     }).then(function (r) {
       webhookResult.textContent = r.ok ? ('OK (' + r.message + ')') : ('Failed: ' + r.message);

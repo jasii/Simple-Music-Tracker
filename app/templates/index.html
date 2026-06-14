@@ -30,6 +30,16 @@
   <button id="btn-refresh" type="button">Refresh following</button>
 </div>
 
+<div class="add-by-link">
+  <input type="text" id="mb-link" placeholder="Monitor an artist by MusicBrainz link or ID..." autocomplete="off">
+  <select id="mb-link-state">
+    <option value="subscribed">Subscribe</option>
+    <option value="notify">Subscribe + Notify</option>
+  </select>
+  <button id="btn-add-link" type="button">Add</button>
+  <span id="mb-link-result" class="muted"></span>
+</div>
+
 <div class="progress" id="progress" hidden></div>
 
 <div class="bulk-bar" id="bulk-bar" hidden>

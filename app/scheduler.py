@@ -26,7 +26,8 @@ def _loop():
         interval_hours = max(interval_hours, 0.25)  # floor at 15 minutes
 
         try:
-            tracker.refresh_all_subscribed()
+            # Hand work to the single refresh worker; it paces external calls.
+            tracker.enqueue_all_subscribed()
         except Exception:  # noqa: BLE001 - never let the scheduler thread die
             pass
 
