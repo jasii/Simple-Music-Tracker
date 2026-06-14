@@ -81,7 +81,7 @@ DEFAULT_SETTINGS = {
     "default_theme": "dark",        # 'dark' (amoled) | 'light'
     "musicbrainz_contact": "",      # email/url used in the MusicBrainz User-Agent
     "default_monitor_types": "album,ep",   # applied to newly followed artists
-    "musicbrainz_rate_limit_ms": "1100",   # min gap between MusicBrainz requests
+    "musicbrainz_rate_limit_ms": "1000",   # min gap between MusicBrainz requests (matches aurral)
 }
 
 # Release types that may be monitored. Order is the display order.

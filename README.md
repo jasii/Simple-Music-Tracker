@@ -174,11 +174,22 @@ Singles).
 All MusicBrainz/Last.fm work is funneled through a **single background worker**
 draining a job queue, so no matter how many artists you bulk-subscribe, requests
 are made one at a time rather than fanning out into thousands of concurrent
-calls. On top of that, MusicBrainz requests are globally paced (minimum gap
-configurable in Settings, never below 1 request/second per their guidelines)
-with a descriptive User-Agent and automatic exponential backoff on `429`/`503`
-responses. This keeps a large library from tripping MusicBrainz's rate limiting
-and getting temporarily blocked.
+calls. This is the equivalent of aurral's MusicBrainz limiter
+(`maxConcurrent: 1, minTime: 1000`).
+
+- **MusicBrainz**: globally paced with a configurable minimum gap (default and
+  floor `1000ms`, i.e. 1 request/second, matching aurral), a descriptive
+  User-Agent, and retries with exponential backoff (`300ms · 2^n`, honoring any
+  `Retry-After` header) on transient connection errors and `429`/`500`/`502`/
+  `503`/`504`. A `404` is treated as "not found" and not retried.
+- **Last.fm**: a 6s timeout with up to 2 retries and small backoff (aurral's
+  values). Calls are serialized through the same worker, so no separate
+  concurrency limiter is needed.
+
+Compared with aurral we deliberately skip its short-TTL response cache (we
+persist MusicBrainz IDs in the database and only refresh on a long interval, so
+repeat lookups are rare) and its multi-provider failover/health-probe machinery
+(out of scope for a single-instance app).
 
 ## Tech
 
