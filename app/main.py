@@ -179,7 +179,7 @@ def artists_page():
 
 @app.route("/subscriptions")
 def subscriptions_page():
-    return render_template("subscriptions.html", **_base_context(active="following"))
+    return render_template("following.html", **_base_context(active="following"))
 
 
 @app.route("/upcoming")
@@ -226,10 +226,15 @@ def album_page():
     title = (request.args.get("title") or "").strip()
     if not artist or not title:
         abort(404)
-    ctx = _base_context(active="upcoming")
+    # Back link returns to wherever the album was opened from (upcoming default).
+    origin = request.args.get("from")
+    back = {"discover": ("discover_page", "Discover")}.get(origin, ("upcoming_page", "Upcoming"))
+    ctx = _base_context(active=back[0].replace("_page", ""))
     ctx["album_artist"] = artist
     ctx["album_title"] = title
     ctx["album_mbid"] = (request.args.get("mbid") or "").strip()
+    ctx["back_endpoint"] = back[0]
+    ctx["back_label"] = back[1]
     return render_template("album.html", **ctx)
 
 

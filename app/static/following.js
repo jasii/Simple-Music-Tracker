@@ -6,7 +6,7 @@
   function card(a) {
     const badge = a.subscription === 'notify'
       ? '<span class="badge">notify</span>'
-      : '<span class="badge">subscribed</span>';
+      : '<span class="badge">following</span>';
     const img = a.image_url
       ? '<img src="' + SMT.esc(a.image_url) + '" alt="" loading="lazy">'
       : '';
@@ -24,7 +24,7 @@
     try {
       const data = await SMT.getJSON('/api/subscriptions');
       if (!data.artists.length) {
-        list.innerHTML = '<p class="muted">Not following anyone yet. Subscribe to artists from the Artists page.</p>';
+        list.innerHTML = '<p class="muted">Not following anyone yet. Follow artists from the Artists page.</p>';
         return;
       }
       list.innerHTML = data.artists.map(card).join('');

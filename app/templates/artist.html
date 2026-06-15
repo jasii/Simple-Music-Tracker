@@ -17,9 +17,9 @@
       <label><input type="radio" name="sub" value="none"
         {{ 'checked' if artist.subscription == 'none' }}> Not following</label>
       <label><input type="radio" name="sub" value="subscribed"
-        {{ 'checked' if artist.subscription == 'subscribed' }}> Subscribe</label>
+        {{ 'checked' if artist.subscription == 'subscribed' }}> Follow</label>
       <label><input type="radio" name="sub" value="notify"
-        {{ 'checked' if artist.subscription == 'notify' }}> Subscribe + Notify</label>
+        {{ 'checked' if artist.subscription == 'notify' }}> Follow + Notify</label>
       <button id="btn-refresh-artist" type="button">Refresh now</button>
     </div>
     <div class="monitor-types" id="monitor-types">

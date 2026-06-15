@@ -22,7 +22,7 @@
       : '';
     const albumHref = '/album?artist=' + encodeURIComponent(r.artist_name) +
       '&title=' + encodeURIComponent(r.title) +
-      (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '');
+      (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '') + '&from=upcoming';
     return (
       '<div class="release">' + img +
       '<div class="grow">' +

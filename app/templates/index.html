@@ -19,7 +19,7 @@
   <select id="filter-subscription">
     <option value="">All</option>
     <option value="following">Following</option>
-    <option value="subscribed">Subscribed</option>
+    <option value="subscribed">Follow only</option>
     <option value="notify">Notify</option>
     <option value="none">Not followed</option>
   </select>
@@ -36,8 +36,8 @@
 <div class="add-by-link">
   <input type="text" id="mb-link" placeholder="Monitor an artist by MusicBrainz link or ID..." autocomplete="off">
   <select id="mb-link-state">
-    <option value="subscribed">Subscribe</option>
-    <option value="notify">Subscribe + Notify</option>
+    <option value="subscribed">Follow</option>
+    <option value="notify">Follow + Notify</option>
   </select>
   <button id="btn-add-link" type="button">Add</button>
   <span id="mb-link-result" class="muted"></span>
@@ -47,9 +47,9 @@
 
 <div class="bulk-bar" id="bulk-bar" hidden>
   <span id="bulk-count">0 selected</span>
-  <button type="button" data-bulk="subscribed">Subscribe</button>
-  <button type="button" data-bulk="notify">Subscribe + Notify</button>
-  <button type="button" data-bulk="none">Unsubscribe</button>
+  <button type="button" data-bulk="subscribed">Follow</button>
+  <button type="button" data-bulk="notify">Follow + Notify</button>
+  <button type="button" data-bulk="none">Unfollow</button>
   <button type="button" id="bulk-ignore">Ignore</button>
   <button type="button" id="bulk-clear">Clear selection</button>
 </div>
@@ -60,8 +60,8 @@
       <th class="col-check"><input type="checkbox" id="select-all" title="Select all"></th>
       <th class="col-name">Artist</th>
       <th class="col-tracks">Tracks</th>
-      <th class="col-sub" title="Show on Following page">Sub</th>
-      <th class="col-notify" title="Subscribe and trigger webhook on new release">Notify</th>
+      <th class="col-sub" title="Show on Following page">Follow</th>
+      <th class="col-notify" title="Follow and trigger webhook on new release">Notify</th>
       <th class="col-ignore" title="Hide from this list">Ignore</th>
     </tr>
   </thead>

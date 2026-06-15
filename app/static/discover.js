@@ -43,7 +43,7 @@
     if (r.artist && r.album) {
       const albumHref = '/album?artist=' + encodeURIComponent(r.artist) +
         '&title=' + encodeURIComponent(r.album) +
-        (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '');
+        (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '') + '&from=discover';
       album = '<a href="' + albumHref + '">' + SMT.esc(r.album) + '</a>';
     } else if (r.album_url) {
       album = '<a href="' + SMT.esc(r.album_url) + '" target="_blank" rel="noopener">' + SMT.esc(r.album || '') + '</a>';
@@ -75,7 +75,7 @@
     const label = (r.artist ? r.artist + ' – ' : '') + (r.album || '');
     const href = (r.artist && r.album)
       ? '/album?artist=' + encodeURIComponent(r.artist) + '&title=' + encodeURIComponent(r.album) +
-        (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '')
+        (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '') + '&from=discover'
       : (r.album_url || r.artist_url || '#');
     return '<a class="cal-event src-' + SMT.esc(r.source) + '" href="' + SMT.esc(href) + '" ' +
       'target="_blank" rel="noopener" title="' + SMT.esc((r.source_label || '') + ': ' + label) + '">' +

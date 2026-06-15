@@ -2,7 +2,7 @@
 {% block title %}{{ album_title }} - Simple Music Tracker{% endblock %}
 
 {% block content %}
-<p><a href="{{ url_for('upcoming_page') }}">&larr; Upcoming</a></p>
+<p><a href="{{ url_for(back_endpoint) }}">&larr; {{ back_label }}</a></p>
 
 <div class="artist-header" id="album-header">
   <div class="artist-meta">
