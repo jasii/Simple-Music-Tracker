@@ -31,9 +31,11 @@
   }
 
   function agendaRow(r) {
-    const img = r.image
-      ? '<img src="' + SMT.esc(r.image) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
-      : '';
+    // The art box always shows a vinyl placeholder as its background; the cover
+    // sits on top. No image, or a broken one (onerror hides it), reveals the vinyl.
+    const img = '<span class="release-art">' + (r.image
+      ? '<img src="' + SMT.esc(r.image) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+      : '') + '</span>';
     const artist = r.artist_url
       ? '<a href="' + SMT.esc(r.artist_url) + '" target="_blank" rel="noopener">' + SMT.esc(r.artist || '') + '</a>'
       : SMT.esc(r.artist || '');
@@ -57,7 +59,7 @@
       : '';
     const action = r.following
       ? '<span class="badge">following</span>'
-      : '<button type="button" class="discover-track" data-artist="' + SMT.esc(r.artist || '') + '">Track artist</button>';
+      : '<button type="button" class="discover-track badge" data-artist="' + SMT.esc(r.artist || '') + '">Follow</button>';
     return (
       '<div class="release">' + img +
       '<div class="grow">' +
@@ -166,15 +168,15 @@
     const artist = btn.getAttribute('data-artist');
     if (!artist) return;
     btn.disabled = true;
-    btn.textContent = 'Tracking...';
+    btn.textContent = 'Following...';
     SMT.postJSON('/api/artists/track-by-name', { name: artist, state: 'subscribed' }).then(function (r) {
-      if (r.error) { btn.disabled = false; btn.textContent = 'Track artist'; return; }
+      if (r.error) { btn.disabled = false; btn.textContent = 'Follow'; return; }
       allItems.forEach(function (it) {
         if ((it.artist || '').toLowerCase() === artist.toLowerCase()) it.following = true;
       });
       btn.replaceWith(Object.assign(document.createElement('span'),
         { className: 'badge', textContent: 'following' }));
-    }).catch(function () { btn.disabled = false; btn.textContent = 'Track artist'; });
+    }).catch(function () { btn.disabled = false; btn.textContent = 'Follow'; });
   });
 
   function showView(view) {
