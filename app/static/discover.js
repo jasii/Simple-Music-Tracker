@@ -90,7 +90,8 @@
       ? '/album?artist=' + encodeURIComponent(r.artist) + '&title=' + encodeURIComponent(r.album) +
         (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '') + '&from=discover'
       : (r.album_url || r.artist_url || '#');
-    const srcs = itemSources(r);
+    // Only sources still toggled on get a bar, so hiding a source drops its bar.
+    const srcs = itemSources(r).filter(function (s) { return !hidden.has(s.key); });
     const classes = 'cal-event ' + srcs.map(function (s) { return 'src-' + SMT.esc(s.key); }).join(' ');
     // Multiple sources: stack one left bar per source (e.g. red + yellow) using
     // inset shadows; a single source keeps the plain left border from CSS.

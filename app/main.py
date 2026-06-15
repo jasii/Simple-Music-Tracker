@@ -25,6 +25,7 @@ from . import (
     artwork,
     db,
     lastfm,
+    maintenance,
     lastfm_scrape,
     metacritic_scrape,
     musicbrainz,
@@ -1272,6 +1273,18 @@ def api_health_lastfm_key():
 def api_health_lastfm_cookie():
     ok, message = lastfm_scrape.check_cookie()
     return jsonify({"ok": ok, "message": message})
+
+
+@app.route("/api/cache/stats")
+def api_cache_stats():
+    """Cache sizes split into kept (followed) vs. stale (unfollowed) bytes."""
+    return jsonify(maintenance.cache_stats())
+
+
+@app.route("/api/cache/purge", methods=["POST"])
+def api_cache_purge():
+    """Delete cached data for artists no longer followed. Returns bytes freed."""
+    return jsonify(maintenance.purge_stale())
 
 
 BACKUP_SECTIONS = ("settings", "artists", "artwork")

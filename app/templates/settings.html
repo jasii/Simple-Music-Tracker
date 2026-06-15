@@ -195,6 +195,18 @@
 </form>
 
 <fieldset class="settings-form">
+  <legend>Cache maintenance</legend>
+  <p class="hint">Unfollowing an artist keeps their cached data. This clears cached
+    discographies, album details, tracked releases and album-art files for artists
+    you no longer follow, to reclaim disk space.</p>
+  <p id="cache-stats" class="muted">Checking cache size...</p>
+  <div class="tool-row">
+    <button type="button" id="btn-purge-cache">Purge stale data</button>
+    <span id="purge-result" class="muted"></span>
+  </div>
+</fieldset>
+
+<fieldset class="settings-form">
   <legend>Backup &amp; restore</legend>
   <p class="hint">A backup is a ZIP file. Choose what to include (default: everything).</p>
   <div class="monitor-types">

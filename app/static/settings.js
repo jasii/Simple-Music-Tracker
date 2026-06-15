@@ -136,6 +136,40 @@
   wireHealthCheck('btn-test-key', 'key-result', '/api/health/lastfm-key');
   wireHealthCheck('btn-test-cookie', 'cookie-result', '/api/health/lastfm-cookie');
 
+  // --- cache maintenance: show sizes, purge stale data ---
+  function fmtBytes(n) {
+    if (!n) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n : n.toFixed(1)) + ' ' + units[i];
+  }
+  const cacheStats = document.getElementById('cache-stats');
+  const purgeBtn = document.getElementById('btn-purge-cache');
+  const purgeResult = document.getElementById('purge-result');
+  function loadCacheStats() {
+    if (!cacheStats) return;
+    SMT.getJSON('/api/cache/stats').then(function (s) {
+      cacheStats.textContent = 'Cache: ' + fmtBytes(s.total_bytes) + ' total, ' +
+        fmtBytes(s.stale_bytes) + ' stale (' + s.stale_json_entries + ' cache entries, ' +
+        s.stale_art_files + ' artwork files).';
+      if (purgeBtn) purgeBtn.disabled = !s.stale_bytes;
+    }).catch(function () { cacheStats.textContent = 'Could not read cache size.'; });
+  }
+  if (purgeBtn) {
+    loadCacheStats();
+    purgeBtn.addEventListener('click', function () {
+      if (!window.confirm('Delete cached data for artists you no longer follow? Your settings and followed artists are untouched.')) return;
+      purgeBtn.disabled = true;
+      purgeResult.textContent = 'Purging...';
+      SMT.postJSON('/api/cache/purge', {}).then(function (r) {
+        purgeResult.textContent = 'Freed ' + fmtBytes(r.freed_bytes) + ' (' +
+          r.art_files_removed + ' artwork files, ' + r.json_entries_removed + ' cache entries).';
+        loadCacheStats();
+      }).catch(function () { purgeResult.textContent = 'Purge failed.'; purgeBtn.disabled = false; });
+    });
+  }
+
   // --- download a backup of the chosen sections ---
   const backupBtn = document.getElementById('btn-backup');
   if (backupBtn) {
