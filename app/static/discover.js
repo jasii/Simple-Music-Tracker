@@ -58,7 +58,7 @@
         }).join('') + '</div>'
       : '';
     const action = r.following
-      ? '<span class="badge">following</span>'
+      ? '<span class="badge following-badge">following<button type="button" class="discover-unfollow" title="Unfollow" data-artist="' + SMT.esc(r.artist || '') + '">&times;</button></span>'
       : '<button type="button" class="discover-track badge" data-artist="' + SMT.esc(r.artist || '') + '">Follow</button>';
     return (
       '<div class="release">' + img +
@@ -163,21 +163,47 @@
     load(btn.getAttribute('data-refresh'));
   });
 
+  function followingBadge(artist) {
+    return '<span class="badge following-badge">following<button type="button" ' +
+      'class="discover-unfollow" title="Unfollow" data-artist="' + SMT.esc(artist) + '">&times;</button></span>';
+  }
+  function followButton(artist) {
+    return '<button type="button" class="discover-track badge" data-artist="' + SMT.esc(artist) + '">Follow</button>';
+  }
+  function setFollowing(artist, following) {
+    allItems.forEach(function (it) {
+      if ((it.artist || '').toLowerCase() === artist.toLowerCase()) it.following = following;
+    });
+  }
+
   agendaList.addEventListener('click', function (e) {
-    const btn = e.target.closest('.discover-track');
-    if (!btn) return;
-    const artist = btn.getAttribute('data-artist');
-    if (!artist) return;
-    btn.disabled = true;
-    btn.textContent = 'Following...';
-    SMT.postJSON('/api/artists/track-by-name', { name: artist, state: 'subscribed' }).then(function (r) {
-      if (r.error) { btn.disabled = false; btn.textContent = 'Follow'; return; }
-      allItems.forEach(function (it) {
-        if ((it.artist || '').toLowerCase() === artist.toLowerCase()) it.following = true;
-      });
-      btn.replaceWith(Object.assign(document.createElement('span'),
-        { className: 'badge', textContent: 'following' }));
-    }).catch(function () { btn.disabled = false; btn.textContent = 'Follow'; });
+    const followBtn = e.target.closest('.discover-track');
+    const unfollowBtn = e.target.closest('.discover-unfollow');
+
+    if (followBtn) {
+      const artist = followBtn.getAttribute('data-artist');
+      if (!artist) return;
+      followBtn.disabled = true;
+      followBtn.textContent = 'Following...';
+      SMT.postJSON('/api/artists/track-by-name', { name: artist, state: 'subscribed' }).then(function (r) {
+        if (r.error) { followBtn.disabled = false; followBtn.textContent = 'Follow'; return; }
+        setFollowing(artist, true);
+        followBtn.outerHTML = followingBadge(artist);
+      }).catch(function () { followBtn.disabled = false; followBtn.textContent = 'Follow'; });
+      return;
+    }
+
+    if (unfollowBtn) {
+      const artist = unfollowBtn.getAttribute('data-artist');
+      if (!artist) return;
+      const badge = unfollowBtn.closest('.following-badge');
+      unfollowBtn.disabled = true;
+      SMT.postJSON('/api/artists/track-by-name', { name: artist, state: 'none' }).then(function (r) {
+        if (r.error) { unfollowBtn.disabled = false; return; }
+        setFollowing(artist, false);
+        if (badge) badge.outerHTML = followButton(artist);
+      }).catch(function () { unfollowBtn.disabled = false; });
+    }
   });
 
   function showView(view) {

@@ -633,16 +633,16 @@ def api_discography(artist_id):
 def api_track_by_name():
     """Start monitoring an artist by name (used by the Discover page).
 
-    Body: {"name": "Artist", "state": "subscribed|notify"}. Creates the artist
-    if it isn't already in the library, then queues a metadata fetch (which
-    resolves the MusicBrainz id from the name).
+    Body: {"name": "Artist", "state": "subscribed|notify|none"}. Following states
+    create the artist if needed and queue a metadata fetch; "none" unfollows an
+    existing artist (and is a no-op if they aren't in the library).
     """
     payload = request.get_json(silent=True) or {}
     name = (payload.get("name") or "").strip()
     state = payload.get("state") or "subscribed"
     if not name:
         return jsonify({"error": "name is required"}), 400
-    if state not in ("subscribed", "notify"):
+    if state not in ("subscribed", "notify", "none"):
         state = "subscribed"
 
     monitor_types = db.normalize_monitor_types(db.get_setting("default_monitor_types"))
@@ -654,11 +654,20 @@ def api_track_by_name():
             ).fetchone()
             if existing:
                 artist_id = existing["id"]
-                conn.execute(
-                    "UPDATE artists SET subscription = ?, ignored = 0 WHERE id = ?",
-                    (state, artist_id),
-                )
+                # Unfollowing leaves the artist (and any ignored flag) alone;
+                # following also un-ignores so they show in the library again.
+                if state == "none":
+                    conn.execute(
+                        "UPDATE artists SET subscription = 'none' WHERE id = ?", (artist_id,)
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE artists SET subscription = ?, ignored = 0 WHERE id = ?",
+                        (state, artist_id),
+                    )
                 created = False
+            elif state == "none":
+                return jsonify({"id": None, "name": name, "subscription": "none", "created": False})
             else:
                 cur = conn.execute(
                     "INSERT INTO artists (name, sort_name, subscription, "
@@ -671,7 +680,8 @@ def api_track_by_name():
         finally:
             conn.close()
 
-    tracker.enqueue_artist(artist_id)
+    if state != "none":
+        tracker.enqueue_artist(artist_id)
     return jsonify({"id": artist_id, "name": name, "subscription": state, "created": created})
 
 

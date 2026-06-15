@@ -229,17 +229,43 @@ def process_pending_webhooks(artist_id=None):
 
 # --- single-worker queue ----------------------------------------------------
 
+# Hard ceiling for one artist's refresh. A hung external request (MusicBrainz
+# occasionally trickles a response that defeats the socket timeout) would
+# otherwise freeze the whole serial queue. Past this we abandon that artist
+# (the stuck thread is left to die on its own) and move to the next one.
+def _job_timeout():
+    try:
+        return max(float(db.get_setting("artist_refresh_timeout") or 180), 30)
+    except (TypeError, ValueError):
+        return 180
+
+
 def _worker():
     while True:
         artist_id = _queue.get()
         try:
             with _pending_lock:
                 _pending.discard(artist_id)
-            result = refresh_artist(artist_id)
+
+            # Run the refresh in a helper thread so we can bound how long it may
+            # take; join() returns early if it finishes, or on timeout.
+            box = {}
+            job = threading.Thread(
+                target=lambda: box.__setitem__("result", refresh_artist(artist_id)),
+                daemon=True,
+            )
+            job.start()
+            job.join(_job_timeout())
+
             with _progress_lock:
                 _progress["processed"] += 1
                 _progress["current"] = ""
-                _progress["message"] = result.get("artist", result.get("error", ""))
+                _progress["current_started"] = 0.0
+                if job.is_alive():
+                    _progress["message"] = "timed out (skipped)"
+                else:
+                    result = box.get("result", {})
+                    _progress["message"] = result.get("artist", result.get("error", ""))
         except Exception:  # noqa: BLE001 - keep the worker alive no matter what
             pass
         finally:

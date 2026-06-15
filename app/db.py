@@ -106,6 +106,7 @@ DEFAULT_SETTINGS = {
     "webhook_lead_value": "0",
     "webhook_lead_unit": "days",     # hours | days | weeks
     "check_interval_hours": "12",
+    "artist_refresh_timeout": "180",  # max seconds to spend on one artist refresh
     "default_theme": "dark",        # 'dark' (amoled) | 'light'
     "musicbrainz_contact": "",      # email/url used in the MusicBrainz User-Agent
     "default_monitor_types": "album,ep",   # applied to newly followed artists

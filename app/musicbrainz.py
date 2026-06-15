@@ -74,30 +74,32 @@ def _backoff_seconds(attempt):
 def _rate_limited_get(url, params=None, _attempt=1):
     """GET MusicBrainz with global pacing and retries on transient failures.
 
-    All callers funnel through here, so only one request is ever in flight and
-    consecutive requests are spaced by at least the configured interval. The
-    network call happens under the lock; retry sleeps happen *outside* it (the
-    lock is not reentrant) so a backoff never blocks other work needlessly.
+    All callers funnel through here and are spaced by at least the configured
+    interval. The lock only reserves the next time slot; the HTTP call happens
+    *outside* it, so one slow/hung request can't block every other MusicBrainz
+    lookup behind the lock. ``timeout`` is a (connect, read) pair so a server
+    that trickles bytes can't hold a request open indefinitely.
     """
+    with _rate_lock:
+        interval = _min_interval()
+        scheduled = max(time.time(), _last_request[0] + interval)
+        _last_request[0] = scheduled
+    wait = scheduled - time.time()
+    if wait > 0:
+        time.sleep(wait)
+
     error = None
     resp = None
-    with _rate_lock:
-        elapsed = time.time() - _last_request[0]
-        interval = _min_interval()
-        if elapsed < interval:
-            time.sleep(interval - elapsed)
-        try:
-            resp = requests.get(
-                url,
-                params=params,
-                headers={"User-Agent": _user_agent(), "Accept": "application/json"},
-                timeout=20,
-            )
-        except (requests.ConnectionError, requests.Timeout) as exc:
-            # Transient connection errors (ECONNRESET/ETIMEDOUT equivalents).
-            error = exc
-        finally:
-            _last_request[0] = time.time()
+    try:
+        resp = requests.get(
+            url,
+            params=params,
+            headers={"User-Agent": _user_agent(), "Accept": "application/json"},
+            timeout=(10, 30),
+        )
+    except (requests.ConnectionError, requests.Timeout) as exc:
+        # Transient connection errors (ECONNRESET/ETIMEDOUT equivalents).
+        error = exc
 
     if error is not None:
         if _attempt <= _MAX_RETRIES:
