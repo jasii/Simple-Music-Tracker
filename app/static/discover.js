@@ -68,6 +68,7 @@
       (r.normalized_date ? '<div class="when">' + fmtDate(r.normalized_date) + '</div>' : '') +
       (r.context ? '<div class="muted discover-context">' + SMT.esc(r.context) + '</div>' : '') +
       genres +
+      ((r.artist && r.album) ? SMT.releaseIcons(r.artist, r.album, r.mbid) : '') +
       '<div class="discover-actions">' + action + '</div>' +
       '</div></div>'
     );

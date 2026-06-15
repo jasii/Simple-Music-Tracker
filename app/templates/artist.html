@@ -76,6 +76,7 @@
 {% block scripts %}
 <script>
   window.ARTIST_ID = {{ artist.id }};
+  window.ARTIST_NAME = {{ artist.name | tojson }};
   window.AUTOHIDE = {{ autohide | tojson }};
 </script>
 <script src="{{ url_for('static', filename='artist.js') }}"></script>

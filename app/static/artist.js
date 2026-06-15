@@ -13,10 +13,14 @@
       ? '<img src="' + SMT.esc(r.image_url) + '" alt="" loading="lazy" ' +
         'onerror="this.style.visibility=\'hidden\'">'
       : '';
+    const href = '/album?artist=' + encodeURIComponent(window.ARTIST_NAME || '') +
+      '&title=' + encodeURIComponent(r.title) +
+      (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '') +
+      '&from=artist&artist_id=' + id;
     return (
       '<div class="release">' + img +
       '<div class="grow">' +
-      '<div class="title">' + SMT.esc(r.title) + '</div>' +
+      '<div class="title"><a href="' + href + '">' + SMT.esc(r.title) + '</a></div>' +
       '<div class="when">' + (r.release_date ? SMT.formatDate(r.release_date) : 'date TBA') + '</div>' +
       '</div></div>'
     );

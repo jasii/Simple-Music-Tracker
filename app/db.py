@@ -70,6 +70,15 @@ CREATE TABLE IF NOT EXISTS discover_cache (
     payload     TEXT NOT NULL       -- JSON array of release items
 );
 
+-- Generic JSON cache for expensive external lookups (MusicBrainz discographies,
+-- album detail / tracklists) so they survive restarts and aren't re-fetched on
+-- every page view. Keyed by an arbitrary string; callers own the TTL.
+CREATE TABLE IF NOT EXISTS json_cache (
+    cache_key   TEXT PRIMARY KEY,
+    fetched_at  REAL NOT NULL,      -- epoch seconds of the last write
+    payload     TEXT NOT NULL       -- arbitrary JSON value
+);
+
 CREATE TABLE IF NOT EXISTS scan_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -249,6 +258,59 @@ def set_discover_cache(source, items):
                 "fetched_at = excluded.fetched_at, payload = excluded.payload",
                 (source, time.time(), payload),
             )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+# --- generic JSON cache -----------------------------------------------------
+
+def get_json_cache(key, max_age=None):
+    """Return the cached value for *key*, or None if absent/stale/corrupt.
+
+    *max_age* (seconds) lets the caller treat anything older as a miss.
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT fetched_at, payload FROM json_cache WHERE cache_key = ?",
+            (key,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    if max_age is not None and (time.time() - row["fetched_at"]) > max_age:
+        return None
+    try:
+        return json.loads(row["payload"])
+    except (TypeError, ValueError):
+        return None
+
+
+def set_json_cache(key, value):
+    """Store *value* (JSON-serialisable) under *key*, stamped now."""
+    payload = json.dumps(value)
+    with _write_lock:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO json_cache (cache_key, fetched_at, payload) "
+                "VALUES (?, ?, ?) ON CONFLICT(cache_key) DO UPDATE SET "
+                "fetched_at = excluded.fetched_at, payload = excluded.payload",
+                (key, time.time(), payload),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def delete_json_cache(key):
+    """Drop a cached entry so the next read re-fetches."""
+    with _write_lock:
+        conn = get_connection()
+        try:
+            conn.execute("DELETE FROM json_cache WHERE cache_key = ?", (key,))
             conn.commit()
         finally:
             conn.close()

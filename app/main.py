@@ -228,13 +228,19 @@ def album_page():
         abort(404)
     # Back link returns to wherever the album was opened from (upcoming default).
     origin = request.args.get("from")
-    back = {"discover": ("discover_page", "Discover")}.get(origin, ("upcoming_page", "Upcoming"))
-    ctx = _base_context(active=back[0].replace("_page", ""))
+    artist_id = request.args.get("artist_id")
+    if origin == "discover":
+        back_url, back_label, active = url_for("discover_page"), "Discover", "discover"
+    elif origin == "artist" and (artist_id or "").isdigit():
+        back_url, back_label, active = url_for("artist_page", artist_id=int(artist_id)), artist, "artists"
+    else:
+        back_url, back_label, active = url_for("upcoming_page"), "Upcoming", "upcoming"
+    ctx = _base_context(active=active)
     ctx["album_artist"] = artist
     ctx["album_title"] = title
     ctx["album_mbid"] = (request.args.get("mbid") or "").strip()
-    ctx["back_endpoint"] = back[0]
-    ctx["back_label"] = back[1]
+    ctx["back_url"] = back_url
+    ctx["back_label"] = back_label
     return render_template("album.html", **ctx)
 
 
@@ -602,7 +608,7 @@ def api_discography(artist_id):
             return jsonify({"error": "no MusicBrainz match", "mbid": None,
                             "groups": {"album": [], "ep": [], "single": []}})
 
-        items = musicbrainz.fetch_discography(mbid)
+        items = musicbrainz.fetch_discography(mbid, force=request.args.get("refresh") == "1")
     except Exception as exc:  # noqa: BLE001 - report fetch failures to the UI
         return jsonify({"error": str(exc), "mbid": mbid,
                         "groups": {"album": [], "ep": [], "single": []}}), 502

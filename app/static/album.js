@@ -41,18 +41,13 @@
       img.onerror = function () { img.remove(); };
       header.insertBefore(img, header.firstChild);
     }
-    if (data.lastfm_url) {
-      linksEl.innerHTML = '<a href="' + SMT.esc(data.lastfm_url) +
-        '" target="_blank" rel="noopener">Last.fm</a>';
-    }
+    linksEl.innerHTML = SMT.releaseIcons(ALBUM.artist, ALBUM.title, ALBUM.mbid);
 
     const tracks = data.tracks || [];
     if (!tracks.length) {
       tracksEl.innerHTML = '<p class="muted">Tracklist not available yet.</p>';
       return;
     }
-    const hasPreview = tracks.some(function (t) { return t.preview_url; });
-    sourceEl.textContent = hasPreview ? '(previews via iTunes)' : '';
     tracksEl.innerHTML = tracks.map(trackRow).join('');
   }
 

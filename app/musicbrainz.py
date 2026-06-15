@@ -208,24 +208,33 @@ def cover_art_url(release_group_mbid):
     return f"{CAA_BASE}/release-group/{release_group_mbid}/front-250"
 
 
-# Short-lived cache of full discographies so revisiting an artist page (or a
-# quick reload) doesn't hit MusicBrainz again. Keyed by MBID.
-_DISCO_TTL = 900  # seconds (15 minutes)
-_disco_cache = {}
-_disco_lock = threading.Lock()
+# Persisted in the DB (json_cache) so an artist's full discography survives
+# restarts and isn't re-fetched from MusicBrainz on every page view. Refreshed
+# when older than this, or on demand via fetch_discography(force=True).
+_DISCO_TTL = 7 * 24 * 3600  # seconds (7 days)
 
 
-def fetch_discography(mbid, use_cache=True):
+def _disco_key(mbid):
+    return "disco:" + mbid
+
+
+def invalidate_discography(mbid):
+    """Drop an artist's cached discography so the next view re-fetches it."""
+    if mbid:
+        db.delete_json_cache(_disco_key(mbid))
+
+
+def fetch_discography(mbid, use_cache=True, force=False):
     """Return every album/EP/single release-group for an artist MBID.
 
     Each item: {mbid, title, primary_type, release_date, image_url}. Results are
-    cached briefly to avoid repeat API calls when navigating around.
+    cached in the DB so revisiting an artist page (even after a restart) doesn't
+    re-hit MusicBrainz until the cache goes stale.
     """
-    if use_cache:
-        with _disco_lock:
-            cached = _disco_cache.get(mbid)
-            if cached and (time.time() - cached[0]) < _DISCO_TTL:
-                return cached[1]
+    if use_cache and not force:
+        cached = db.get_json_cache(_disco_key(mbid), max_age=_DISCO_TTL)
+        if cached is not None:
+            return cached
 
     items = []
     for rg in fetch_release_groups(mbid, {"album", "ep", "single"}):
@@ -242,8 +251,7 @@ def fetch_discography(mbid, use_cache=True):
             }
         )
 
-    with _disco_lock:
-        _disco_cache[mbid] = (time.time(), items)
+    db.set_json_cache(_disco_key(mbid), items)
     return items
 
 

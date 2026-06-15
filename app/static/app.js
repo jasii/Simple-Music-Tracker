@@ -53,4 +53,21 @@ window.SMT = {
     if (days < 0) return Math.abs(days) + ' days ago';
     return 'in ' + days + ' days';
   },
+  // External lookup icons (Last.fm / MusicBrainz / YouTube Music) for a release.
+  // MusicBrainz link only when a release-group mbid is known.
+  releaseIcons(artist, album, mbid) {
+    const a = encodeURIComponent(artist || '');
+    const al = encodeURIComponent(album || '');
+    const links = [
+      '<a href="https://www.last.fm/music/' + a + '/' + al + '" target="_blank" rel="noopener noreferrer">' +
+      '<img src="/static/last-fm-light.svg" alt="Last.fm" class="icon-medium"></a>',
+    ];
+    if (mbid) {
+      links.push('<a href="https://musicbrainz.org/release-group/' + this.esc(mbid) + '" target="_blank" rel="noopener noreferrer">' +
+        '<img src="/static/musicbrainz.svg" alt="MusicBrainz" class="icon-medium"></a>');
+    }
+    links.push('<a href="https://music.youtube.com/search?q=' + encodeURIComponent((artist || '') + ' ' + (album || '')) +
+      '" target="_blank" rel="noopener noreferrer"><img src="/static/youtube-music.svg" alt="YouTube Music" class="icon-medium"></a>');
+    return '<div class="release-icons">' + links.join('') + '</div>';
+  },
 };

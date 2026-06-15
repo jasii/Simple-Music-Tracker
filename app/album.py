@@ -4,17 +4,15 @@ Tracklist comes from Last.fm (album.getInfo). Last.fm serves no audio, so 30s
 previews are pulled from the iTunes Search API (free, no key) and matched to the
 tracklist by name. If Last.fm has nothing, the iTunes tracklist is used directly.
 
-Results are cached in memory for a while - these pages are read often and the
-data barely changes.
+Results are cached in the DB (json_cache) so these often-read pages don't hit
+Last.fm/iTunes on every view and survive a restart.
 """
 
 import re
-import threading
-import time
 
 import requests
 
-from . import lastfm, musicbrainz
+from . import db, lastfm, musicbrainz
 
 ITUNES_SEARCH = "https://itunes.apple.com/search"
 USER_AGENT = (
@@ -22,9 +20,9 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 
-_CACHE_TTL = 6 * 3600
-_cache = {}
-_lock = threading.Lock()
+# Tracklists/previews/cover change rarely once a record exists; cache in the DB
+# (survives restarts) and only re-fetch when older than this.
+_CACHE_TTL = 14 * 24 * 3600
 
 
 def _norm(name):
@@ -93,12 +91,11 @@ def get_album_detail(artist, title, mbid=None, force=False):
     Each track: {name, duration, url, preview_url}. Best-effort; tracks may be
     empty for not-yet-released albums.
     """
-    key = ((artist or "").lower(), (title or "").lower())
+    key = "album:" + (artist or "").lower() + "|" + (title or "").lower()
     if not force:
-        with _lock:
-            hit = _cache.get(key)
-            if hit and (time.time() - hit["at"]) < _CACHE_TTL:
-                return hit["data"]
+        cached = db.get_json_cache(key, max_age=_CACHE_TTL)
+        if cached:
+            return cached
 
     lf = {}
     try:
@@ -141,6 +138,8 @@ def get_album_detail(artist, title, mbid=None, force=False):
         "tracks": tracks,
         "source": source,
     }
-    with _lock:
-        _cache[key] = {"at": time.time(), "data": data}
+    # Only cache once there's something worth keeping, so a transient API failure
+    # doesn't pin an empty tracklist for two weeks.
+    if tracks or image:
+        db.set_json_cache(key, data)
     return data

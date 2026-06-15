@@ -115,6 +115,11 @@ def refresh_artist(artist_id, fire_webhooks=True):
             )
             conn.commit()
 
+        # New releases may have landed; drop the cached discography so the artist
+        # page re-pulls a fresh list next time it's opened.
+        if mbid and new_releases:
+            musicbrainz.invalidate_discography(mbid)
+
         # Fire any webhooks now due for this artist (honours the trigger timing).
         notified = process_pending_webhooks(artist_id) if fire_webhooks else 0
 
