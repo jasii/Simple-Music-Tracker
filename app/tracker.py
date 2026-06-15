@@ -13,6 +13,7 @@ would otherwise let thousands of requests fan out at once and get blocked.)
 
 import queue
 import threading
+import time
 
 from . import db, lastfm, musicbrainz, webhooks
 
@@ -24,8 +25,11 @@ _pending_lock = threading.Lock()
 _worker_started = False
 
 # Progress for the UI: cumulative processed count and current/last artist.
+# `current_started` stamps when the in-flight artist began, so the UI can show
+# how long the worker has been on it - the tell for "stuck" vs merely "slow".
 _progress_lock = threading.Lock()
-_progress = {"processed": 0, "queued": 0, "current": "", "message": ""}
+_progress = {"processed": 0, "queued": 0, "current": "", "current_started": 0.0,
+             "message": ""}
 
 
 def get_refresh_state():
@@ -33,6 +37,8 @@ def get_refresh_state():
         state = dict(_progress)
     state["queued"] = _queue.qsize()
     state["running"] = state["queued"] > 0 or bool(state["current"])
+    started = state.pop("current_started", 0.0)
+    state["elapsed"] = int(time.time() - started) if state["current"] and started else 0
     return state
 
 
@@ -50,6 +56,10 @@ def refresh_artist(artist_id, fire_webhooks=True):
         ).fetchone()
         if artist is None:
             return {"error": "artist not found"}
+
+        # Mark this artist in-flight so the status shows who we're on and for how
+        # long (a job that never clears is the stuck one).
+        _set_progress(current=artist["name"], current_started=time.time())
 
         monitor_types = set(
             (artist["monitor_types"] or "album,ep").split(",")
@@ -117,6 +127,7 @@ def refresh_artist(artist_id, fire_webhooks=True):
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
     finally:
+        _set_progress(current="", current_started=0.0)
         conn.close()
 
 
@@ -249,14 +260,32 @@ def enqueue_artist(artist_id):
     return True
 
 
-def enqueue_all_subscribed():
-    """Queue every followed artist for refresh. Returns how many were queued."""
+def enqueue_all_subscribed(stale_only=False):
+    """Queue followed artists for refresh, oldest-checked first.
+
+    Ordering by `last_checked` (never-checked first, then most stale) means a
+    restart resumes where it left off instead of re-syncing the same artists in
+    alphabetical order every boot. When *stale_only* is set (the scheduled/boot
+    pass), artists checked within `check_interval_hours` are skipped, so a reboot
+    doesn't redo work that was just done. Returns how many were queued.
+    """
+    sql = (
+        "SELECT id FROM artists WHERE subscription IN ('subscribed', 'notify')"
+    )
+    params = []
+    if stale_only:
+        try:
+            hours = max(float(db.get_setting("check_interval_hours") or 12), 0)
+        except (TypeError, ValueError):
+            hours = 12
+        sql += " AND (last_checked IS NULL OR last_checked <= datetime('now', ?))"
+        params.append(f"-{hours} hours")
+    # NULLs (never checked) first, then the oldest last_checked.
+    sql += " ORDER BY last_checked IS NULL DESC, last_checked ASC"
+
     conn = db.get_connection()
     try:
-        rows = conn.execute(
-            "SELECT id FROM artists WHERE subscription IN ('subscribed', 'notify') "
-            "ORDER BY sort_name"
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     finally:
         conn.close()
     queued = 0

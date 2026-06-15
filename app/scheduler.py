@@ -36,7 +36,9 @@ def _loop():
         if now - last_artist >= _hours("check_interval_hours", 12, 0.25) * 3600:
             last_artist = now
             try:
-                tracker.enqueue_all_subscribed()
+                # Only the stale ones, oldest first, so a reboot resumes instead
+                # of re-syncing every artist alphabetically from scratch.
+                tracker.enqueue_all_subscribed(stale_only=True)
             except Exception:  # noqa: BLE001 - never let the scheduler thread die
                 pass
 

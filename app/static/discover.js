@@ -37,9 +37,19 @@
     const artist = r.artist_url
       ? '<a href="' + SMT.esc(r.artist_url) + '" target="_blank" rel="noopener">' + SMT.esc(r.artist || '') + '</a>'
       : SMT.esc(r.artist || '');
-    const album = r.album_url
-      ? '<a href="' + SMT.esc(r.album_url) + '" target="_blank" rel="noopener">' + SMT.esc(r.album || '') + '</a>'
-      : SMT.esc(r.album || '');
+    // Link the title to our in-app album page (tracks + previews). Fall back to
+    // the source's external link, then plain text, when we can't build one.
+    let album;
+    if (r.artist && r.album) {
+      const albumHref = '/album?artist=' + encodeURIComponent(r.artist) +
+        '&title=' + encodeURIComponent(r.album) +
+        (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '');
+      album = '<a href="' + albumHref + '">' + SMT.esc(r.album) + '</a>';
+    } else if (r.album_url) {
+      album = '<a href="' + SMT.esc(r.album_url) + '" target="_blank" rel="noopener">' + SMT.esc(r.album || '') + '</a>';
+    } else {
+      album = SMT.esc(r.album || '');
+    }
     const genres = (r.genres && r.genres.length)
       ? '<div class="discover-genres">' + r.genres.map(function (g) {
           return '<span class="genre-tag">' + SMT.esc(g) + '</span>';
@@ -63,7 +73,10 @@
 
   function calEvent(r) {
     const label = (r.artist ? r.artist + ' – ' : '') + (r.album || '');
-    const href = r.album_url || r.artist_url || '#';
+    const href = (r.artist && r.album)
+      ? '/album?artist=' + encodeURIComponent(r.artist) + '&title=' + encodeURIComponent(r.album) +
+        (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '')
+      : (r.album_url || r.artist_url || '#');
     return '<a class="cal-event src-' + SMT.esc(r.source) + '" href="' + SMT.esc(href) + '" ' +
       'target="_blank" rel="noopener" title="' + SMT.esc((r.source_label || '') + ': ' + label) + '">' +
       SMT.esc(label) + '</a>';
