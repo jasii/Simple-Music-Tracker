@@ -9,10 +9,10 @@
   const CATS = [['album', 'Albums'], ['ep', 'EPs'], ['single', 'Singles']];
 
   function releaseHTML(r) {
-    const img = r.image_url
-      ? '<img src="' + SMT.esc(r.image_url) + '" alt="" loading="lazy" ' +
-        'onerror="this.style.visibility=\'hidden\'">'
-      : '';
+    // Vinyl placeholder shows through when there's no cover or it fails to load.
+    const img = '<span class="release-art">' + (r.image_url
+      ? '<img src="' + SMT.esc(r.image_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+      : '') + '</span>';
     const href = '/album?artist=' + encodeURIComponent(window.ARTIST_NAME || '') +
       '&title=' + encodeURIComponent(r.title) +
       (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '') +

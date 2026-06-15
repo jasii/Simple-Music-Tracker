@@ -65,6 +65,18 @@
   </fieldset>
 
   <fieldset>
+    <legend>Discover sources</legend>
+    <label>Show these sources on the Discover page</label>
+    <div class="monitor-types">
+      <label><input type="checkbox" name="discover_lastfm_enabled" value="true"
+        {{ 'checked' if settings.discover_lastfm_enabled != 'false' }}> Last.fm</label>
+      <label><input type="checkbox" name="discover_metacritic_enabled" value="true"
+        {{ 'checked' if settings.discover_metacritic_enabled != 'false' }}> Metacritic</label>
+    </div>
+    <p class="hint">Turn a source off to stop scraping it and hide it from Discover. Last.fm also needs a session cookie above.</p>
+  </fieldset>
+
+  <fieldset>
     <legend>Monitoring defaults</legend>
     {% set default_watched = (settings.default_monitor_types or 'album,ep').split(',') %}
     <label>Release types to monitor for newly followed artists</label>

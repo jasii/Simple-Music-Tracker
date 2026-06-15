@@ -88,6 +88,8 @@
     if (!('discography_autohide' in data)) data.discography_autohide = '';
     // A lone unchecked checkbox is absent from FormData; send false explicitly.
     if (!('prefer_album_artist' in data)) data.prefer_album_artist = 'false';
+    if (!('discover_lastfm_enabled' in data)) data.discover_lastfm_enabled = 'false';
+    if (!('discover_metacritic_enabled' in data)) data.discover_metacritic_enabled = 'false';
     return data;
   }
 

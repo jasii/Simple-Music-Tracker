@@ -33,14 +33,17 @@
 
   function render(data) {
     artistEl.textContent = data.artist || '';
+    // Cover art box: vinyl placeholder shows when there's no image or it fails.
+    const art = document.createElement('span');
+    art.className = 'release-art album-art';
     if (data.image) {
       const img = document.createElement('img');
-      img.className = 'artist-image';
       img.loading = 'lazy';
       img.src = data.image;
-      img.onerror = function () { img.remove(); };
-      header.insertBefore(img, header.firstChild);
+      img.onerror = function () { img.style.display = 'none'; };
+      art.appendChild(img);
     }
+    header.insertBefore(art, header.firstChild);
     linksEl.innerHTML = SMT.releaseIcons(ALBUM.artist, ALBUM.title, ALBUM.mbid);
 
     const tracks = data.tracks || [];

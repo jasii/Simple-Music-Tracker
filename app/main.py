@@ -690,16 +690,22 @@ def api_track_by_name():
 # Registry of new-release discovery sources. Each has a label, a check for
 # whether it's set up, and a fetch returning (items, cached). More can be added
 # here later (other sites/feeds) and they'll appear on the Discover page.
+def _enabled(setting):
+    return (db.get_setting(setting) or "true").lower() not in ("false", "0", "off", "no", "")
+
+
 DISCOVER_SOURCES = {
     "lastfm": {
         "label": "Last.fm",
-        "configured": lambda: bool((db.get_setting("lastfm_cookie") or "").strip()),
+        # Toggled on in Settings and a session cookie is configured.
+        "configured": lambda: _enabled("discover_lastfm_enabled")
+        and bool((db.get_setting("lastfm_cookie") or "").strip()),
         "fetch": lastfm_scrape.fetch_coming_soon,
     },
     "metacritic": {
         "label": "Metacritic",
-        # Public page - no auth needed, so always available.
-        "configured": lambda: True,
+        # Public page - no auth needed; just the Settings toggle.
+        "configured": lambda: _enabled("discover_metacritic_enabled"),
         "fetch": metacritic_scrape.fetch_coming_soon,
     },
 }
@@ -1187,7 +1193,7 @@ def api_settings():
             value = ",".join(normalize_nav_order(value))
         elif key == "nav_hidden":
             value = ",".join([k.strip() for k in str(value).split(",") if k.strip() in PAGE_DEFS])
-        elif key == "prefer_album_artist":
+        elif key in ("prefer_album_artist", "discover_lastfm_enabled", "discover_metacritic_enabled"):
             value = "true" if str(value).lower() in ("true", "1", "on", "yes") else "false"
         elif key == "discover_refresh_hours":
             try:
