@@ -135,6 +135,17 @@
   wireHealthCheck('btn-test-key', 'key-result', '/api/health/lastfm-key');
   wireHealthCheck('btn-test-cookie', 'cookie-result', '/api/health/lastfm-cookie');
 
+  // --- download a backup of the chosen sections ---
+  const backupBtn = document.getElementById('btn-backup');
+  if (backupBtn) {
+    backupBtn.addEventListener('click', function () {
+      const sections = Array.from(document.querySelectorAll('.backup-section:checked'))
+        .map(function (cb) { return cb.value; });
+      if (!sections.length) { return; }
+      window.location = '/api/backup?sections=' + encodeURIComponent(sections.join(','));
+    });
+  }
+
   // --- import / restore from a backup file ---
   const importBtn = document.getElementById('btn-import');
   const importFile = document.getElementById('import-file');
@@ -152,8 +163,12 @@
         .then(function (r) {
           if (r.error) { importResult.textContent = r.error; return; }
           const c = r.imported || {};
-          importResult.textContent = 'Imported ' + (c.artists || 0) + ' artists, ' +
-            (c.releases || 0) + ' releases. Reloading...';
+          const parts = [];
+          if ('settings' in c) parts.push(c.settings + ' settings');
+          if ('artists' in c) parts.push(c.artists + ' artists');
+          if ('releases' in c) parts.push(c.releases + ' releases');
+          if ('artwork' in c) parts.push(c.artwork + ' artwork files');
+          importResult.textContent = 'Imported ' + (parts.join(', ') || 'nothing') + '. Reloading...';
           setTimeout(function () { window.location.reload(); }, 1000);
         })
         .catch(function () { importResult.textContent = 'Import failed.'; });

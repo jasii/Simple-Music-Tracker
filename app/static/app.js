@@ -35,6 +35,10 @@ window.SMT = {
     });
     return res.json();
   },
+  // Route a remote image through our on-disk cache (disk-first, URL fallback).
+  art(url) {
+    return url ? '/art?u=' + encodeURIComponent(url) : '';
+  },
   // Escape text for safe insertion into innerHTML.
   esc(value) {
     const div = document.createElement('div');

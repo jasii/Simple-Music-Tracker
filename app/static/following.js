@@ -8,7 +8,7 @@
       ? '<span class="badge">notify</span>'
       : '<span class="badge">following</span>';
     const img = a.image_url
-      ? '<img src="' + SMT.esc(a.image_url) + '" alt="" loading="lazy">'
+      ? '<img src="' + SMT.esc(SMT.art(a.image_url)) + '" alt="" loading="lazy">'
       : '';
     return (
       '<div class="card">' + img +

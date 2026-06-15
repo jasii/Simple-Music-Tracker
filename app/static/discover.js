@@ -40,7 +40,7 @@
     // The art box always shows a vinyl placeholder as its background; the cover
     // sits on top. No image, or a broken one (onerror hides it), reveals the vinyl.
     const img = '<span class="release-art">' + (r.image
-      ? '<img src="' + SMT.esc(r.image) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+      ? '<img src="' + SMT.esc(SMT.art(r.image)) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
       : '') + '</span>';
     const artist = r.artist_url
       ? '<a href="' + SMT.esc(r.artist_url) + '" target="_blank" rel="noopener">' + SMT.esc(r.artist || '') + '</a>'

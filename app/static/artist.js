@@ -11,7 +11,7 @@
   function releaseHTML(r) {
     // Vinyl placeholder shows through when there's no cover or it fails to load.
     const img = '<span class="release-art">' + (r.image_url
-      ? '<img src="' + SMT.esc(r.image_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+      ? '<img src="' + SMT.esc(SMT.art(r.image_url)) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
       : '') + '</span>';
     const href = '/album?artist=' + encodeURIComponent(window.ARTIST_NAME || '') +
       '&title=' + encodeURIComponent(r.title) +

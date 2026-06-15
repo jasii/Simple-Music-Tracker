@@ -355,47 +355,80 @@ def export_data():
         conn.close()
 
 
-def import_data(data):
-    """Replace all data with a previously exported snapshot.
+def _insert_row(conn, table, columns, row):
+    cols = [c for c in columns if c in row]
+    placeholders = ",".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO {table} ({','.join(cols)}) VALUES ({placeholders})",
+        [row[c] for c in cols],
+    )
 
-    Returns counts. Raises ValueError if the payload is not a valid backup.
-    """
-    if not isinstance(data, dict) or "artists" not in data or "settings" not in data:
-        raise ValueError("not a valid backup file")
 
-    settings = data.get("settings") or {}
-    artists = data.get("artists") or []
-    releases = data.get("releases") or []
+def export_settings():
+    """Raw stored settings (the 'settings' backup section)."""
+    conn = get_connection()
+    try:
+        return {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings")}
+    finally:
+        conn.close()
 
-    def _insert(conn, table, columns, row):
-        cols = [c for c in columns if c in row]
-        placeholders = ",".join("?" for _ in cols)
-        conn.execute(
-            f"INSERT INTO {table} ({','.join(cols)}) VALUES ({placeholders})",
-            [row[c] for c in cols],
-        )
 
+def export_artists():
+    """Artists + their tracked releases (the 'artist information' section)."""
+    conn = get_connection()
+    try:
+        return {
+            "artists": _rows(conn, "SELECT * FROM artists"),
+            "releases": _rows(conn, "SELECT * FROM releases"),
+        }
+    finally:
+        conn.close()
+
+
+def import_settings(settings):
+    """Upsert settings from a backup. Returns how many keys were written."""
+    settings = settings or {}
     with _write_lock:
         conn = get_connection()
         try:
-            conn.execute("DELETE FROM releases")
-            conn.execute("DELETE FROM artists")
             for key, value in settings.items():
                 conn.execute(
                     "INSERT INTO settings (key, value) VALUES (?, ?) "
                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                     (str(key), None if value is None else str(value)),
                 )
-            for artist in artists:
-                _insert(conn, "artists", _ARTIST_COLUMNS, artist)
-            for release in releases:
-                _insert(conn, "releases", _RELEASE_COLUMNS, release)
             conn.commit()
         finally:
             conn.close()
+    return len(settings)
 
-    return {
-        "settings": len(settings),
-        "artists": len(artists),
-        "releases": len(releases),
-    }
+
+def import_artists(artists, releases):
+    """Replace artists + releases from a backup. Returns counts."""
+    artists = artists or []
+    releases = releases or []
+    with _write_lock:
+        conn = get_connection()
+        try:
+            conn.execute("DELETE FROM releases")
+            conn.execute("DELETE FROM artists")
+            for artist in artists:
+                _insert_row(conn, "artists", _ARTIST_COLUMNS, artist)
+            for release in releases:
+                _insert_row(conn, "releases", _RELEASE_COLUMNS, release)
+            conn.commit()
+        finally:
+            conn.close()
+    return {"artists": len(artists), "releases": len(releases)}
+
+
+def import_data(data):
+    """Replace all data with a previously exported (legacy JSON) snapshot.
+
+    Returns counts. Raises ValueError if the payload is not a valid backup.
+    """
+    if not isinstance(data, dict) or "artists" not in data or "settings" not in data:
+        raise ValueError("not a valid backup file")
+    n_settings = import_settings(data.get("settings") or {})
+    counts = import_artists(data.get("artists") or [], data.get("releases") or [])
+    return {"settings": n_settings, **counts}

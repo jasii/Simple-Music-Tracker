@@ -1,11 +1,13 @@
 """Flask application: pages and JSON API for Simple Music Tracker."""
 
+import io
 import json
 import os
 import sqlite3
 import threading
 import time
-from datetime import date, datetime, timedelta
+import zipfile
+from datetime import date, datetime, timedelta, timezone
 
 from flask import (
     Flask,
@@ -14,11 +16,13 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     url_for,
 )
 
 from . import (
     album as album_detail,
+    artwork,
     db,
     lastfm,
     lastfm_scrape,
@@ -217,6 +221,24 @@ def artist_page(artist_id):
     ctx["artist"]["bio"] = lastfm.clean_bio(ctx["artist"].get("bio"))
     ctx["autohide"] = db.get_setting("discography_autohide") or ""
     return render_template("artist.html", **ctx)
+
+
+@app.route("/art")
+def art_proxy():
+    """Serve cached album art from disk, fetching + saving it on first request.
+
+    Falls back to redirecting to the source URL only when the bytes aren't on
+    disk and can't be downloaded.
+    """
+    url = request.args.get("u")
+    if not url:
+        abort(404)
+    path = artwork.cached_path(url) or artwork.fetch(url)
+    if path:
+        resp = send_file(path, mimetype=artwork.content_type(path))
+        resp.headers["Cache-Control"] = "public, max-age=604800"
+        return resp
+    return redirect(url)
 
 
 @app.route("/album")
@@ -1238,41 +1260,91 @@ def api_health_lastfm_cookie():
     return jsonify({"ok": ok, "message": message})
 
 
+BACKUP_SECTIONS = ("settings", "artists", "artwork")
+
+
 @app.route("/api/backup")
 def api_backup():
-    """Download a JSON backup of settings, artists and releases."""
-    data = db.export_data()
-    body = json.dumps(data, indent=2, ensure_ascii=False)
-    resp = app.response_class(body, mimetype="application/json")
-    resp.headers["Content-Disposition"] = (
-        f"attachment; filename=smt-backup-{date.today().isoformat()}.json"
+    """Download a ZIP backup. ?sections=settings,artists,artwork (default all).
+
+    - settings: your settings
+    - artists:  artist information (artists + tracked releases)
+    - artwork:  the cached album-art/artist-image files on disk
+    """
+    requested = (request.args.get("sections") or "").strip()
+    sections = [s for s in requested.split(",") if s in BACKUP_SECTIONS] or list(BACKUP_SECTIONS)
+
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", json.dumps({
+            "version": db.BACKUP_VERSION,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "sections": sections,
+        }))
+        if "settings" in sections:
+            z.writestr("settings.json", json.dumps(db.export_settings()))
+        if "artists" in sections:
+            z.writestr("artists.json", json.dumps(db.export_artists()))
+        if "artwork" in sections:
+            art = artwork.art_dir()
+            for name in os.listdir(art):
+                path = os.path.join(art, name)
+                if os.path.isfile(path) and not name.endswith(".part"):
+                    z.write(path, "artwork/" + name)
+    mem.seek(0)
+    return send_file(
+        mem, mimetype="application/zip", as_attachment=True,
+        download_name=f"smt-backup-{date.today().isoformat()}.zip",
     )
-    return resp
 
 
 @app.route("/api/import", methods=["POST"])
 def api_import():
-    """Restore from a backup file (multipart 'file') or a raw JSON body.
+    """Restore from a backup. Accepts the new ZIP format or a legacy JSON file.
 
-    This REPLACES all current settings and data.
+    Whatever sections are present in the archive are restored (settings upserted,
+    artist information replaced, artwork files written to disk).
     """
-    payload = None
-    if "file" in request.files:
-        try:
-            payload = json.load(request.files["file"])
-        except (ValueError, OSError):
-            return jsonify({"error": "could not parse the uploaded file as JSON"}), 400
-    else:
+    f = request.files.get("file")
+    if f is None:
         payload = request.get_json(silent=True)
+        if payload is None:
+            return jsonify({"error": "no backup file provided"}), 400
+        try:
+            return jsonify({"imported": db.import_data(payload)})
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
+    raw = f.read()
+    if zipfile.is_zipfile(io.BytesIO(raw)):
+        result = {}
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                names = set(z.namelist())
+                if "settings.json" in names:
+                    result["settings"] = db.import_settings(json.loads(z.read("settings.json")))
+                if "artists.json" in names:
+                    info = json.loads(z.read("artists.json"))
+                    result.update(db.import_artists(info.get("artists"), info.get("releases")))
+                art_names = [n for n in names if n.startswith("artwork/") and not n.endswith("/")]
+                if art_names:
+                    art = artwork.art_dir()
+                    for n in art_names:
+                        base = os.path.basename(n)  # sha1 name; strips any path
+                        if base:
+                            with open(os.path.join(art, base), "wb") as out:
+                                out.write(z.read(n))
+                    result["artwork"] = len(art_names)
+        except (ValueError, OSError, KeyError) as exc:
+            return jsonify({"error": f"import failed: {exc}"}), 400
+        return jsonify({"imported": result})
+
+    # Legacy plain-JSON backup.
     try:
-        result = db.import_data(payload)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": f"import failed: {exc}"}), 500
-
-    return jsonify({"imported": result})
+        payload = json.loads(raw)
+        return jsonify({"imported": db.import_data(payload)})
+    except ValueError:
+        return jsonify({"error": "could not parse the uploaded file"}), 400
 
 
 @app.route("/api/health")

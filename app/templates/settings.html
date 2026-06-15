@@ -190,16 +190,22 @@
 
 <fieldset class="settings-form">
   <legend>Backup &amp; restore</legend>
-  <p class="hint">A backup is a JSON file containing your settings, artists, subscriptions and tracked releases.</p>
-  <p><a class="button-link" href="{{ url_for('api_backup') }}">Download backup</a></p>
+  <p class="hint">A backup is a ZIP file. Choose what to include (default: everything).</p>
+  <div class="monitor-types">
+    <label><input type="checkbox" class="backup-section" value="settings" checked> Settings</label>
+    <label><input type="checkbox" class="backup-section" value="artists" checked> Artist information</label>
+    <label><input type="checkbox" class="backup-section" value="artwork" checked> Artwork</label>
+  </div>
+  <p><button type="button" id="btn-backup">Download backup</button></p>
 
   <label for="import-file">Restore from a backup file</label>
   <div class="tool-row">
-    <input type="file" id="import-file" accept="application/json,.json">
+    <input type="file" id="import-file" accept=".zip,application/zip,application/json,.json">
     <button type="button" id="btn-import">Import &amp; replace</button>
     <span id="import-result" class="muted"></span>
   </div>
-  <p class="hint">Importing replaces all current settings and data with the backup's contents.</p>
+  <p class="hint">Restoring writes back whatever the file contains: settings are merged,
+    artist information is replaced, artwork files are restored to disk. Older JSON backups still work.</p>
 </fieldset>
 {% endblock %}
 

@@ -3,12 +3,18 @@ services:
     build: .
     container_name: simple-music-tracker
     ports:
-      - "8080:8080"
+      - "${PORT:-8080}:8080"
     volumes:
-      # Persist the SQLite database.
-      - ./data:/data
-      # Mount your music library read-only. Set the path on the left to yours.
-      - /path/to/your/music:/music:ro
+      # All app state lives here: the SQLite DB, which also holds every cache
+      # (album art URLs, discographies, tracklists, Discover results). Back up
+      # this one folder and you've backed up everything.
+      # Override the host path by setting DATA_DIR (e.g. /srv/music-tracker/data).
+      - ${DATA_DIR:-./data}:/data
+
+      # OPTIONAL local music library, mounted read-only for scanning. Not
+      # required - you can track artists manually without any library. To enable
+      # it, uncomment the line below and set MUSIC_DIR to your library path.
+      # - ${MUSIC_DIR:-/path/to/your/music}:/music:ro
     environment:
       - SMT_DB_PATH=/data/tracker.db
     restart: unless-stopped

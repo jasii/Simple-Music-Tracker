@@ -18,7 +18,7 @@
 
   function agendaRow(r) {
     const img = r.image_url
-      ? '<img src="' + SMT.esc(r.image_url) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+      ? '<img src="' + SMT.esc(SMT.art(r.image_url)) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
       : '';
     const albumHref = '/album?artist=' + encodeURIComponent(r.artist_name) +
       '&title=' + encodeURIComponent(r.title) +

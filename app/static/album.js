@@ -39,7 +39,7 @@
     if (data.image) {
       const img = document.createElement('img');
       img.loading = 'lazy';
-      img.src = data.image;
+      img.src = SMT.art(data.image);
       img.onerror = function () { img.style.display = 'none'; };
       art.appendChild(img);
     }
