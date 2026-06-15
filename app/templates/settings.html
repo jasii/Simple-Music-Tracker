@@ -180,6 +180,12 @@
       <option value="light" {{ 'selected' if settings.default_theme == 'light' }}>Light</option>
     </select>
     <p class="hint">The toggle in the header overrides this per device.</p>
+
+    <div class="monitor-types">
+      <label><input type="checkbox" name="hide_page_descriptions" value="true"
+        {{ 'checked' if settings.hide_page_descriptions == 'true' }}> Hide page descriptions</label>
+    </div>
+    <p class="hint">Hides the short intro text under the title on the Discover, Upcoming and Following pages.</p>
   </fieldset>
 
   <div class="form-actions">
@@ -199,12 +205,17 @@
   <p><button type="button" id="btn-backup">Download backup</button></p>
 
   <label for="import-file">Restore from a backup file</label>
+  <input type="file" id="import-file" accept=".zip,application/zip,application/json,.json">
+  <div class="monitor-types">
+    <label><input type="checkbox" class="import-section" value="settings" checked> Settings</label>
+    <label><input type="checkbox" class="import-section" value="artists" checked> Artist information</label>
+    <label><input type="checkbox" class="import-section" value="artwork" checked> Artwork</label>
+  </div>
   <div class="tool-row">
-    <input type="file" id="import-file" accept=".zip,application/zip,application/json,.json">
     <button type="button" id="btn-import">Import &amp; replace</button>
     <span id="import-result" class="muted"></span>
   </div>
-  <p class="hint">Restoring writes back whatever the file contains: settings are merged,
+  <p class="hint">Only the ticked sections that exist in the file are restored: settings are merged,
     artist information is replaced, artwork files are restored to disk. Older JSON backups still work.</p>
 </fieldset>
 {% endblock %}

@@ -2,13 +2,11 @@
 {% block title %}Upcoming - Simple Music Tracker{% endblock %}
 
 {% block content %}
-<h1>Upcoming Releases</h1>
-<p class="muted">New and upcoming albums from artists you follow.</p>
-
-<div class="tabs" id="view-toggle">
-  <button data-view="agenda" class="on">Agenda</button>
-  <button data-view="calendar">Calendar</button>
+<div class="page-head">
+  <h1>Upcoming Releases</h1>
+  {% include "_view_toggle.html" %}
 </div>
+{% if not hide_page_descriptions %}<p class="muted">New and upcoming albums from artists you follow.</p>{% endif %}
 
 <div id="agenda-view">
   <div id="agenda-list" class="agenda">

@@ -3,7 +3,7 @@
 
 {% block content %}
 <h1>Following</h1>
-<p class="muted">Artists you follow. "Notify" artists also trigger your webhook on a new release.</p>
+{% if not hide_page_descriptions %}<p class="muted">Artists you follow. "Notify" artists also trigger your webhook on a new release.</p>{% endif %}
 
 <div id="following-list" class="card-list">
   <p class="muted">Loading...</p>

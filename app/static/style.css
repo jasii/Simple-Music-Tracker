@@ -194,17 +194,17 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
   align-items: center;
 }
 .release img {
-  width: 120px; height: 120px;
+  width: 150px; height: 150px;
   object-fit: cover; border-radius: 4px;
   background: var(--row-hover);
 }
 .release-art {
-  width: 120px; height: 120px; flex: none;
+  width: 150px; height: 150px; flex: none;
   border-radius: 4px;
-  background: var(--row-hover) url("vinyl.svg") no-repeat center / 70px 70px;
+  background: var(--row-hover) url("vinyl.svg") no-repeat center / 88px 88px;
 }
 .release-art img { width: 100%; height: 100%; display: block; }
-.album-art { width: 140px; height: 140px; border-radius: 6px; background-size: 80px 80px; }
+.album-art { width: 175px; height: 175px; border-radius: 6px; background-size: 100px 100px; }
 .release .grow { flex: 1; min-width: 0; }
 .release .title { font-weight: 600; }
 .release .when { color: var(--muted); font-size: 0.9rem; }
@@ -257,6 +257,8 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
 /* Tabs */
 .tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.8rem 0; }
 .tabs button.on { border-color: var(--fg); }
+/* Icon-only view buttons; pointer-events:none keeps clicks on the button. */
+.tabs button .btn-icon { width: 1.05em; height: 1.05em; display: block; pointer-events: none; }
 
 /* Agenda (week by week) */
 .agenda-week { margin-bottom: 1.4rem; }
@@ -316,8 +318,12 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
 }
 
 /* Discover */
-.discover-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; margin: 0.6rem 0; }
-.source-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; flex: 1; }
+/* Title on the left, page controls pushed to the right, on one line. */
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem 1rem; flex-wrap: wrap; }
+.page-head h1 { margin: 0; }
+.page-head .tabs { margin: 0; }
+.discover-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; margin: 0; }
+.source-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .source-chip { display: inline-flex; align-items: center; gap: 0.3rem; border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.6rem; }
 .source-chip.disabled { color: var(--muted); }
 .source-chip label { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }

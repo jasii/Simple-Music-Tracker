@@ -278,11 +278,23 @@ def api_album():
     title = (request.args.get("title") or "").strip()
     if not artist or not title:
         return jsonify({"error": "artist and title are required"}), 400
-    data = album_detail.get_album_detail(
+    data = dict(album_detail.get_album_detail(
         artist, title,
         mbid=(request.args.get("mbid") or "").strip() or None,
         force=request.args.get("refresh") == "1",
-    )
+    ))
+    # Live (uncached) library status for this artist, so the page can show a
+    # follow toggle and link the name to the artist page when it's tracked.
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id, subscription FROM artists WHERE sort_name = ?",
+            (artist.lower(),),
+        ).fetchone()
+    finally:
+        conn.close()
+    data["artist_id"] = row["id"] if row else None
+    data["following"] = bool(row and row["subscription"] in ("subscribed", "notify"))
     return jsonify(data)
 
 
@@ -298,6 +310,7 @@ def _base_context(active=""):
     return {
         "active": active,
         "default_theme": db.get_setting("default_theme") or "dark",
+        "hide_page_descriptions": (db.get_setting("hide_page_descriptions") or "false") == "true",
     }
 
 
@@ -1215,7 +1228,8 @@ def api_settings():
             value = ",".join(normalize_nav_order(value))
         elif key == "nav_hidden":
             value = ",".join([k.strip() for k in str(value).split(",") if k.strip() in PAGE_DEFS])
-        elif key in ("prefer_album_artist", "discover_lastfm_enabled", "discover_metacritic_enabled"):
+        elif key in ("prefer_album_artist", "discover_lastfm_enabled",
+                     "discover_metacritic_enabled", "hide_page_descriptions"):
             value = "true" if str(value).lower() in ("true", "1", "on", "yes") else "false"
         elif key == "discover_refresh_hours":
             try:
@@ -1302,32 +1316,37 @@ def api_backup():
 def api_import():
     """Restore from a backup. Accepts the new ZIP format or a legacy JSON file.
 
-    Whatever sections are present in the archive are restored (settings upserted,
-    artist information replaced, artwork files written to disk).
+    Only the sections present in the file AND requested are restored (settings
+    upserted, artist information replaced, artwork files written to disk).
+    ``sections`` (form field or query, comma list) filters what's applied;
+    omit it to restore every section the file contains.
     """
+    requested = (request.values.get("sections") or "").strip()
+    allowed = {s for s in requested.split(",") if s in BACKUP_SECTIONS} if requested else None
+
+    def want(section):
+        return allowed is None or section in allowed
+
     f = request.files.get("file")
-    if f is None:
+    raw = f.read() if f is not None else None
+    if raw is None:
         payload = request.get_json(silent=True)
         if payload is None:
             return jsonify({"error": "no backup file provided"}), 400
-        try:
-            return jsonify({"imported": db.import_data(payload)})
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
+        raw = json.dumps(payload).encode("utf-8")
 
-    raw = f.read()
+    result = {}
     if zipfile.is_zipfile(io.BytesIO(raw)):
-        result = {}
         try:
             with zipfile.ZipFile(io.BytesIO(raw)) as z:
                 names = set(z.namelist())
-                if "settings.json" in names:
+                if want("settings") and "settings.json" in names:
                     result["settings"] = db.import_settings(json.loads(z.read("settings.json")))
-                if "artists.json" in names:
+                if want("artists") and "artists.json" in names:
                     info = json.loads(z.read("artists.json"))
                     result.update(db.import_artists(info.get("artists"), info.get("releases")))
                 art_names = [n for n in names if n.startswith("artwork/") and not n.endswith("/")]
-                if art_names:
+                if want("artwork") and art_names:
                     art = artwork.art_dir()
                     for n in art_names:
                         base = os.path.basename(n)  # sha1 name; strips any path
@@ -1339,12 +1358,18 @@ def api_import():
             return jsonify({"error": f"import failed: {exc}"}), 400
         return jsonify({"imported": result})
 
-    # Legacy plain-JSON backup.
+    # Legacy plain-JSON backup (settings + artist info only; no artwork).
     try:
         payload = json.loads(raw)
-        return jsonify({"imported": db.import_data(payload)})
     except ValueError:
         return jsonify({"error": "could not parse the uploaded file"}), 400
+    if not isinstance(payload, dict) or "artists" not in payload or "settings" not in payload:
+        return jsonify({"error": "not a valid backup file"}), 400
+    if want("settings"):
+        result["settings"] = db.import_settings(payload.get("settings") or {})
+    if want("artists"):
+        result.update(db.import_artists(payload.get("artists") or [], payload.get("releases") or []))
+    return jsonify({"imported": result})
 
 
 @app.route("/api/health")

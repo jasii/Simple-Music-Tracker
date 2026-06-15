@@ -88,6 +88,7 @@
     if (!('discography_autohide' in data)) data.discography_autohide = '';
     // A lone unchecked checkbox is absent from FormData; send false explicitly.
     if (!('prefer_album_artist' in data)) data.prefer_album_artist = 'false';
+    if (!('hide_page_descriptions' in data)) data.hide_page_descriptions = 'false';
     if (!('discover_lastfm_enabled' in data)) data.discover_lastfm_enabled = 'false';
     if (!('discover_metacritic_enabled' in data)) data.discover_metacritic_enabled = 'false';
     return data;
@@ -155,9 +156,13 @@
       const file = importFile.files && importFile.files[0];
       if (!file) { importResult.textContent = 'Choose a backup file first.'; return; }
       if (!window.confirm('Importing replaces ALL current settings and data with this backup. Continue?')) return;
+      const sections = Array.from(document.querySelectorAll('.import-section:checked'))
+        .map(function (cb) { return cb.value; });
+      if (!sections.length) { importResult.textContent = 'Pick at least one section.'; return; }
       importResult.textContent = 'Importing...';
       const fd = new FormData();
       fd.append('file', file);
+      fd.append('sections', sections.join(','));
       fetch('/api/import', { method: 'POST', body: fd })
         .then(function (res) { return res.json(); })
         .then(function (r) {

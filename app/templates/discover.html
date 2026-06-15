@@ -2,17 +2,15 @@
 {% block title %}Discover - Simple Music Tracker{% endblock %}
 
 {% block content %}
-<h1>Discover</h1>
-<p class="muted">Find new music to track that may not be in your library yet.</p>
-
-<div class="discover-controls">
-  <div class="tabs" id="view-toggle">
-    <button data-view="agenda" class="on">Agenda</button>
-    <button data-view="calendar">Calendar</button>
+<div class="page-head">
+  <h1>Discover</h1>
+  <div class="discover-controls">
+    {% include "_view_toggle.html" %}
+    <div id="source-filters" class="source-filters"></div>
+    <button id="discover-refresh" type="button">Refresh all</button>
   </div>
-  <div id="source-filters" class="source-filters"></div>
-  <button id="discover-refresh" type="button">Refresh all</button>
 </div>
+{% if not hide_page_descriptions %}<p class="muted">Find new music to track that may not be in your library yet.</p>{% endif %}
 <p class="muted" id="discover-status"></p>
 
 <div id="agenda-view">

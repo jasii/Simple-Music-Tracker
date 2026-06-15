@@ -26,13 +26,43 @@
       '<div class="track-row">' +
       '<span class="muted track-num">' + (i + 1) + '</span>' +
       '<span class="track-name">' + name + '</span>' +
-      dur + preview +
+      preview + dur +
       '</div>'
     );
   }
 
+  // Follow / unfollow toggle (mirrors the Discover badge).
+  let following = false;
+  function followControl() {
+    return following
+      ? '<span class="badge following-badge">following<button type="button" class="album-unfollow" title="Unfollow">&times;</button></span>'
+      : '<button type="button" class="discover-track badge album-follow">Follow</button>';
+  }
+  function renderArtist(data) {
+    const name = SMT.esc(data.artist || '');
+    const link = data.artist_id
+      ? '<a href="/artist/' + data.artist_id + '">' + name + '</a>'
+      : name;
+    artistEl.innerHTML = link + ' ' + followControl();
+  }
+  artistEl.addEventListener('click', function (e) {
+    const followBtn = e.target.closest('.album-follow');
+    const unfollowBtn = e.target.closest('.album-unfollow');
+    if (!followBtn && !unfollowBtn) return;
+    const state = followBtn ? 'subscribed' : 'none';
+    const btn = followBtn || unfollowBtn;
+    btn.disabled = true;
+    SMT.postJSON('/api/artists/track-by-name', { name: ALBUM.artist, state: state }).then(function (r) {
+      if (r.error) { btn.disabled = false; return; }
+      following = (state !== 'none');
+      // Re-render so a freshly-followed artist also gains its library link.
+      artistEl.querySelector('.badge, .album-follow').outerHTML = followControl();
+    }).catch(function () { btn.disabled = false; });
+  });
+
   function render(data) {
-    artistEl.textContent = data.artist || '';
+    following = !!data.following;
+    renderArtist(data);
     // Cover art box: vinyl placeholder shows when there's no image or it fails.
     const art = document.createElement('span');
     art.className = 'release-art album-art';

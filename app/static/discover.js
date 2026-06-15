@@ -82,14 +82,27 @@
     );
   }
 
+  const SRC_COLORS = { lastfm: '#d51007', metacritic: '#ffcc33' };
+
   function calEvent(r) {
     const label = (r.artist ? r.artist + ' – ' : '') + (r.album || '');
     const href = (r.artist && r.album)
       ? '/album?artist=' + encodeURIComponent(r.artist) + '&title=' + encodeURIComponent(r.album) +
         (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '') + '&from=discover'
       : (r.album_url || r.artist_url || '#');
-    return '<a class="cal-event src-' + SMT.esc(r.source) + '" href="' + SMT.esc(href) + '" ' +
-      'target="_blank" rel="noopener" title="' + SMT.esc((r.source_label || '') + ': ' + label) + '">' +
+    const srcs = itemSources(r);
+    const classes = 'cal-event ' + srcs.map(function (s) { return 'src-' + SMT.esc(s.key); }).join(' ');
+    // Multiple sources: stack one left bar per source (e.g. red + yellow) using
+    // inset shadows; a single source keeps the plain left border from CSS.
+    let style = '';
+    const colors = srcs.map(function (s) { return SRC_COLORS[s.key]; }).filter(Boolean);
+    if (colors.length > 1) {
+      const bars = colors.map(function (c, i) { return 'inset ' + (2 * (i + 1)) + 'px 0 0 0 ' + c; });
+      style = ' style="border-left:none;box-shadow:' + bars.join(',') + ';padding-left:' + (2 * colors.length + 4) + 'px"';
+    }
+    const tip = srcs.map(function (s) { return s.label; }).filter(Boolean).join(' + ') + ': ' + label;
+    return '<a class="' + classes + '" href="' + SMT.esc(href) + '"' + style + ' ' +
+      'target="_blank" rel="noopener" title="' + SMT.esc(tip) + '">' +
       SMT.esc(label) + '</a>';
   }
 
