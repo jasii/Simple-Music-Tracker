@@ -18,6 +18,7 @@ from flask import (
 )
 
 from . import (
+    album as album_detail,
     db,
     lastfm,
     lastfm_scrape,
@@ -211,6 +212,40 @@ def artist_page(artist_id):
     ctx["artist"] = _row_to_dict(artist)
     ctx["autohide"] = db.get_setting("discography_autohide") or ""
     return render_template("artist.html", **ctx)
+
+
+@app.route("/album")
+def album_page():
+    """Detail page for one release: title, tracks, and audio previews.
+
+    Keyed by query params (artist, title, optional release-group mbid) since
+    discovered releases aren't always in the library. The shell renders fast;
+    album.js fetches the tracklist from /api/album.
+    """
+    artist = (request.args.get("artist") or "").strip()
+    title = (request.args.get("title") or "").strip()
+    if not artist or not title:
+        abort(404)
+    ctx = _base_context(active="upcoming")
+    ctx["album_artist"] = artist
+    ctx["album_title"] = title
+    ctx["album_mbid"] = (request.args.get("mbid") or "").strip()
+    return render_template("album.html", **ctx)
+
+
+@app.route("/api/album")
+def api_album():
+    """Tracklist + previews for a release. Params: artist, title, mbid?, refresh?."""
+    artist = (request.args.get("artist") or "").strip()
+    title = (request.args.get("title") or "").strip()
+    if not artist or not title:
+        return jsonify({"error": "artist and title are required"}), 400
+    data = album_detail.get_album_detail(
+        artist, title,
+        mbid=(request.args.get("mbid") or "").strip() or None,
+        force=request.args.get("refresh") == "1",
+    )
+    return jsonify(data)
 
 
 @app.route("/settings")

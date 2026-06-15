@@ -73,11 +73,31 @@ def _best_image(images):
     return None
 
 
-def get_album_info(artist, album):
-    """Return {image_url, genres} for a release, or {} on failure.
+def _album_tracks(info):
+    """Pull an ordered tracklist out of an album.getInfo payload."""
+    block = info.get("tracks") or {}
+    raw = block.get("track") if isinstance(block, dict) else None
+    if isinstance(raw, dict):  # single-track albums come back as one object
+        raw = [raw]
+    tracks = []
+    for t in raw or []:
+        name = t.get("name")
+        if not name:
+            continue
+        duration = t.get("duration")
+        try:
+            duration = int(duration) if duration else None
+        except (TypeError, ValueError):
+            duration = None
+        tracks.append({"name": name, "duration": duration, "url": t.get("url")})
+    return tracks
 
-    One call to album.getInfo gives both the cover image and the album's
-    top tags (used as genres). Needs a configured Last.fm API key.
+
+def get_album_info(artist, album):
+    """Return {image_url, genres, tracks} for a release, or {} on failure.
+
+    One call to album.getInfo gives the cover image, the album's top tags
+    (used as genres), and the tracklist. Needs a configured Last.fm API key.
     """
     api_key = db.get_setting("lastfm_api_key")
     if not api_key or not artist or not album:
@@ -105,6 +125,8 @@ def get_album_info(artist, album):
     return {
         "image_url": _best_image(info.get("image")),
         "genres": genres,
+        "lastfm_url": info.get("url"),
+        "tracks": _album_tracks(info),
     }
 
 

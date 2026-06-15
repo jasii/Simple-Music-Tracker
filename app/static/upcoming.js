@@ -20,10 +20,13 @@
     const img = r.image_url
       ? '<img src="' + SMT.esc(r.image_url) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
       : '';
+    const albumHref = '/album?artist=' + encodeURIComponent(r.artist_name) +
+      '&title=' + encodeURIComponent(r.title) +
+      (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '');
     return (
       '<div class="release">' + img +
       '<div class="grow">' +
-      '<div class="title">' + SMT.esc(r.title) + '</div>' +
+      '<div class="title"><a href="' + albumHref + '">' + SMT.esc(r.title) + '</a></div>' +
       '<div><a href="/artist/' + r.artist_id + '">' + SMT.esc(r.artist_name) + '</a> ' +
       '<span class="muted">' + SMT.esc(r.primary_type || '') + '</span></div>' +
       '<div class="when">' + (r.normalized_date ? fmtDate(r.normalized_date) : 'date TBA') + '</div>' +

@@ -321,6 +321,11 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
 .cal-event.src-metacritic { border-left-color: #ffcc33; }
 .discover-artist { font-size: 0.95rem; }
 .discover-context { font-size: 0.8rem; }
+.track-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0; border-bottom: 1px solid var(--line); }
+.track-num { width: 1.5rem; text-align: right; flex: none; }
+.track-name { flex: 1 1 auto; min-width: 0; }
+.track-dur { flex: none; }
+.track-preview { height: 2rem; flex: none; max-width: 240px; }
 .discover-genres { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.3rem; }
 .genre-tag { font-size: 0.7rem; border: 1px solid var(--line); border-radius: 999px; padding: 0 0.45rem; color: var(--muted); text-transform: capitalize; }
 .discover-actions { margin-top: 0.3rem; }
