@@ -28,7 +28,7 @@
       '<div class="grow">' +
       '<div class="title"><a href="' + albumHref + '">' + SMT.esc(r.title) + '</a></div>' +
       '<div><a href="/artist/' + r.artist_id + '">' + SMT.esc(r.artist_name) + '</a> ' +
-      '<span class="muted">' + SMT.esc(r.primary_type || '') + '</span></div>' +
+      (r.primary_type ? '<span class="genre-tag">' + SMT.esc(r.primary_type) + '</span>' : '') + '</div>' +
       '<div class="when">' + (r.normalized_date ? fmtDate(r.normalized_date) : 'date TBA') + '</div>' +
       '<div class="muted" style="display: flex; gap: 0.8rem; margin-top: 0.2rem;">' +
       '<a href="https://www.last.fm/music/' + encodeURIComponent(r.artist_name) + '/' + encodeURIComponent(r.title) + '" target="_blank" rel="noopener noreferrer"><img src="/static/last-fm-light.svg" alt="Last.fm" class="icon-medium"></a>' +
