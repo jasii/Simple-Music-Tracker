@@ -157,8 +157,11 @@ def inject_nav():
     """Make the (ordered) nav items and labels available to every template."""
     order = normalize_nav_order(db.get_setting("nav_order"))
     hidden_keys = set((db.get_setting("nav_hidden") or "").split(","))
+    # The home page (first tab) and Settings can never be hidden.
+    home_key = order[0] if order else None
     items = [
-        {"key": k, "endpoint": PAGE_DEFS[k][0], "label": PAGE_DEFS[k][1], "hidden": k in hidden_keys and k != "settings"}
+        {"key": k, "endpoint": PAGE_DEFS[k][0], "label": PAGE_DEFS[k][1],
+         "hidden": k in hidden_keys and k != "settings" and k != home_key}
         for k in order
     ]
     return {"nav_items": items}

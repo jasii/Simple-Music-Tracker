@@ -15,8 +15,18 @@
     function sync() {
       const lis = Array.from(list.querySelectorAll('li'));
       orderInput.value = lis.map(function (li) { return li.getAttribute('data-key'); }).join(',');
-      lis.forEach(function (li, i) { li.classList.toggle('is-home', i === 0); });
-      
+      lis.forEach(function (li, i) {
+        const home = i === 0;
+        li.classList.toggle('is-home', home);
+        // The home page (top tab) must always show: force its Show toggle on and
+        // lock it so it can't be unchecked.
+        const cb = li.querySelector('.nav-show-toggle');
+        if (cb) {
+          if (home) cb.checked = true;
+          cb.disabled = home;
+        }
+      });
+
       const hidden = lis.filter(function (li) {
         const cb = li.querySelector('.nav-show-toggle');
         return cb && !cb.checked;
