@@ -412,20 +412,21 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
 }
 
 .icon-small {
-  height: 16px; /* Or desired favicon size */
-  width: 16px; /* Or desired favicon size */
+  height: 16px !important;
+  width: 16px !important;
   vertical-align: middle;
 }
 
 .icon-medium {
-  height: 24px;
-  width: 24px;
+  height: 24px !important;
+  width: 24px !important;
   vertical-align: middle;
 }
 
 .icon-large {
-  height: 32px;
-  width: 32px;
+  height: 32px !important;
+  width: 32px !important;
   vertical-align: middle;
 }
+
 
