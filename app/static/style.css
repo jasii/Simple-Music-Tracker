@@ -410,3 +410,22 @@ input[type="checkbox"], input[type="radio"] { width: 1.1rem; height: 1.1rem; }
   .artists-table thead th { top: 5.5rem; }
   body { font-size: 15px; }
 }
+
+.icon-small {
+  height: 16px; /* Or desired favicon size */
+  width: 16px; /* Or desired favicon size */
+  vertical-align: middle;
+}
+
+.icon-medium {
+  height: 24px;
+  width: 24px;
+  vertical-align: middle;
+}
+
+.icon-large {
+  height: 32px;
+  width: 32px;
+  vertical-align: middle;
+}
+

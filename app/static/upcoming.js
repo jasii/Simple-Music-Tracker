@@ -28,9 +28,9 @@
       '<span class="muted">' + SMT.esc(r.primary_type || '') + '</span></div>' +
       '<div class="when">' + (r.normalized_date ? fmtDate(r.normalized_date) : 'date TBA') + '</div>' +
       '<div class="muted">' +
-      '<a href="https://www.last.fm/music/' + encodeURIComponent(r.artist_name) + '/' + encodeURIComponent(r.title) + '" target="_blank" rel="noopener noreferrer"><img src="/static/last-fm-light.svg" alt="Last.fm" style="height:1em;vertical-align:middle;"></a>' +
-      (r.mbid ? ' <a href="https://musicbrainz.org/release-group/' + SMT.esc(r.mbid) + '" target="_blank" rel="noopener noreferrer"><img src="/static/musicbrainz.svg" alt="MusicBrainz" style="height:1em;vertical-align:middle;"></a>' : '') +
-      ' <a href="https://music.youtube.com/search?q=' + encodeURIComponent(r.artist_name + ' ' + r.title) + '" target="_blank" rel="noopener noreferrer"><img src="/static/youtube-music.svg" alt="YouTube Music" style="height:1em;vertical-align:middle;"></a>' +
+' <a href="https://www.last.fm/music/' + encodeURIComponent(r.artist_name) + '/' + encodeURIComponent(r.title) + '" target="_blank" rel="noopener noreferrer"><img src="/static/last-fm-light.svg" alt="Last.fm" class="icon-small"></a>' +
+      (r.mbid ? ' <a href="https://musicbrainz.org/release-group/' + SMT.esc(r.mbid) + '" target="_blank" rel="noopener noreferrer"><img src="/static/musicbrainz.svg" alt="MusicBrainz" class="icon-small"></a>' : '') +
+      ' <a href="https://music.youtube.com/search?q=' + encodeURIComponent(r.artist_name + ' ' + r.title) + '" target="_blank" rel="noopener noreferrer"><img src="/static/youtube-music.svg" alt="YouTube Music" class="icon-small"></a>' +
       '</div>' +
       '</div></div>'
     );
