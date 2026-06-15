@@ -17,9 +17,10 @@
   }
 
   function agendaRow(r) {
-    const img = r.image_url
-      ? '<img src="' + SMT.esc(SMT.art(r.image_url)) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
-      : '';
+    // Vinyl placeholder shows through when there's no cover or it fails to load.
+    const img = '<span class="release-art">' + (r.image_url
+      ? '<img src="' + SMT.esc(SMT.art(r.image_url)) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+      : '') + '</span>';
     const albumHref = '/album?artist=' + encodeURIComponent(r.artist_name) +
       '&title=' + encodeURIComponent(r.title) +
       (r.mbid ? '&mbid=' + encodeURIComponent(r.mbid) : '') + '&from=upcoming';

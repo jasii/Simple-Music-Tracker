@@ -120,7 +120,7 @@
       }
       const checked = hidden.has(s.key) ? '' : ' checked';
       const err = s.error ? ' <span class="muted">(error)</span>' : '';
-      return '<span class="source-chip"><label><input type="checkbox" data-source="' + SMT.esc(s.key) + '"' +
+      return '<span class="source-chip src-' + SMT.esc(s.key) + '"><label><input type="checkbox" data-source="' + SMT.esc(s.key) + '"' +
         checked + '> ' + SMT.esc(s.label) + err + '</label>' +
         '<button type="button" class="source-refresh" data-refresh="' + SMT.esc(s.key) + '"' +
         ' title="Refresh ' + SMT.esc(s.label) + '">&#x21bb;</button></span>';
