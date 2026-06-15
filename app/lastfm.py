@@ -5,6 +5,7 @@ serving real artist images through the API (they return a placeholder star),
 so callers should treat the image as best-effort and fall back to album art.
 """
 
+import re
 import time
 
 import requests
@@ -12,6 +13,19 @@ import requests
 from . import db
 
 LASTFM_BASE = "https://ws.audioscrobbler.com/2.0/"
+
+# Last.fm appends a trailing '<a ...>Read more on Last.fm</a>' to every bio
+# summary; drop it (and any trailing whitespace) but keep the description.
+_READMORE_RE = re.compile(
+    r"\s*<a\b[^>]*>\s*Read more on Last\.fm\s*</a>\s*$", re.IGNORECASE
+)
+
+
+def clean_bio(bio):
+    """Strip the trailing 'Read more on Last.fm' link from a bio summary."""
+    if not bio:
+        return bio
+    return _READMORE_RE.sub("", bio).strip()
 
 
 def check_api_key():
@@ -161,7 +175,7 @@ def get_artist_info(name):
     bio = ""
     bio_block = artist.get("bio", {})
     if bio_block:
-        bio = (bio_block.get("summary") or "").strip()
+        bio = clean_bio(bio_block.get("summary") or "")
 
     return {
         "bio": bio,

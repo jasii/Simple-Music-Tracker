@@ -62,10 +62,13 @@ window.SMT = {
       '<a href="https://www.last.fm/music/' + a + '/' + al + '" target="_blank" rel="noopener noreferrer">' +
       '<img src="/static/last-fm-light.svg" alt="Last.fm" class="icon-medium"></a>',
     ];
-    if (mbid) {
-      links.push('<a href="https://musicbrainz.org/release-group/' + this.esc(mbid) + '" target="_blank" rel="noopener noreferrer">' +
-        '<img src="/static/musicbrainz.svg" alt="MusicBrainz" class="icon-medium"></a>');
-    }
+    // Direct release-group link when we know the mbid, else a MusicBrainz search.
+    const mbHref = mbid
+      ? 'https://musicbrainz.org/release-group/' + encodeURIComponent(mbid)
+      : 'https://musicbrainz.org/search?type=release_group&method=indexed&query=' +
+        encodeURIComponent((artist || '') + ' ' + (album || ''));
+    links.push('<a href="' + mbHref + '" target="_blank" rel="noopener noreferrer">' +
+      '<img src="/static/musicbrainz.svg" alt="MusicBrainz" class="icon-medium"></a>');
     links.push('<a href="https://music.youtube.com/search?q=' + encodeURIComponent((artist || '') + ' ' + (album || '')) +
       '" target="_blank" rel="noopener noreferrer"><img src="/static/youtube-music.svg" alt="YouTube Music" class="icon-medium"></a>');
     return '<div class="release-icons">' + links.join('') + '</div>';

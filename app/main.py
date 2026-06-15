@@ -213,6 +213,8 @@ def artist_page(artist_id):
         abort(404)
     ctx = _base_context(active="artists")
     ctx["artist"] = _row_to_dict(artist)
+    # Strip Last.fm's trailing "Read more" link from bios stored before this fix.
+    ctx["artist"]["bio"] = lastfm.clean_bio(ctx["artist"].get("bio"))
     ctx["autohide"] = db.get_setting("discography_autohide") or ""
     return render_template("artist.html", **ctx)
 
@@ -764,6 +766,44 @@ def _kick_refresh(key, src):
         thread.start()
 
 
+def _merge_discover_items(items):
+    """Collapse the same album seen from multiple sources into one row.
+
+    Keyed by (artist, album) case-insensitively. The merged row keeps every
+    source in a `sources` list (so the agenda can show both tags) and fills any
+    missing image/genres/date/context/mbid from whichever source has them.
+    Items lacking an artist or album are never merged.
+    """
+    merged = []
+    by_key = {}
+    for it in items:
+        artist = (it.get("artist") or "").strip().lower()
+        album = (it.get("album") or "").strip().lower()
+        src = {"key": it.get("source"), "label": it.get("source_label")}
+        key = (artist, album) if artist and album else None
+        existing = by_key.get(key) if key else None
+        if existing is None:
+            row = dict(it)
+            row["sources"] = [src]
+            merged.append(row)
+            if key:
+                by_key[key] = row
+            continue
+        # Same album from another source: record the tag and backfill blanks.
+        if src not in existing["sources"]:
+            existing["sources"].append(src)
+        for field in ("image", "context", "mbid", "artist_url", "album_url"):
+            if not existing.get(field) and it.get(field):
+                existing[field] = it[field]
+        if not existing.get("genres") and it.get("genres"):
+            existing["genres"] = it["genres"]
+        # Keep the earliest known release date.
+        nd = it.get("normalized_date")
+        if nd and (not existing.get("normalized_date") or nd < existing["normalized_date"]):
+            existing["normalized_date"] = nd
+    return merged
+
+
 @app.route("/api/discover/sources")
 def api_discover_sources():
     """List the available discovery sources and whether each is configured."""
@@ -809,6 +849,7 @@ def api_discover_releases():
                 items.append(tagged)
         sources.append(entry)
 
+    items = _merge_discover_items(items)
     _flag_known_artists(items)
     items.sort(key=lambda r: r.get("normalized_date") or "9999")
     return jsonify({

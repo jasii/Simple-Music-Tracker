@@ -21,8 +21,14 @@
     try { localStorage.setItem('discoverHidden', JSON.stringify(Array.from(hidden))); } catch (e) {}
   }
 
+  // A merged item carries several sources; show it if any of them is visible.
+  function itemSources(r) {
+    return (r.sources && r.sources.length) ? r.sources : [{ key: r.source, label: r.source_label }];
+  }
   function visibleItems() {
-    return allItems.filter(function (r) { return !hidden.has(r.source); });
+    return allItems.filter(function (r) {
+      return itemSources(r).some(function (s) { return !hidden.has(s.key); });
+    });
   }
 
   function fmtDate(iso) {
@@ -63,7 +69,9 @@
     return (
       '<div class="release">' + img +
       '<div class="grow">' +
-      '<div class="title">' + album + ' <span class="src-tag src-' + SMT.esc(r.source) + '">' + SMT.esc(r.source_label || '') + '</span></div>' +
+      '<div class="title">' + album + ' ' + itemSources(r).map(function (s) {
+        return '<span class="src-tag src-' + SMT.esc(s.key) + '">' + SMT.esc(s.label || '') + '</span>';
+      }).join(' ') + '</div>' +
       '<div class="discover-artist">' + artist + '</div>' +
       (r.normalized_date ? '<div class="when">' + fmtDate(r.normalized_date) + '</div>' : '') +
       (r.context ? '<div class="muted discover-context">' + SMT.esc(r.context) + '</div>' : '') +
