@@ -94,9 +94,21 @@
     else { RelView.agenda(agendaList, visibleItems(), agendaRow, 'No releases to show. Pick a source or add one in Settings.'); }
   }
 
+  let pollTimer = null;
+
+  // Re-poll (without disturbing what's on screen) while any source is still
+  // scraping in the background, so freshly-scraped releases appear when ready.
+  function schedulePoll(refreshing) {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    if (refreshing) pollTimer = setTimeout(function () { load(null, true); }, 5000);
+  }
+
   // refresh: falsy = use cache, a source key = re-scrape that source, 'all' = every source.
-  function load(refresh) {
-    agendaList.innerHTML = '<p class="muted">' + (refresh ? 'Refreshing...' : 'Loading...') + '</p>';
+  // poll: true when this is a background re-check (don't blank the list first).
+  function load(refresh, poll) {
+    if (!poll) {
+      agendaList.innerHTML = '<p class="muted">' + (loaded ? 'Refreshing...' : 'Loading...') + '</p>';
+    }
     const q = refresh ? ('?refresh=' + encodeURIComponent(refresh)) : '';
     SMT.getJSON('/api/discover/releases' + q).then(function (data) {
       sources = data.sources || [];
@@ -104,8 +116,10 @@
       loaded = true;
       renderSources();
       const errs = sources.filter(function (s) { return s.error; });
+      const busy = sources.filter(function (s) { return s.refreshing; });
       status.textContent = data.count + ' releases from ' +
         sources.filter(function (s) { return s.configured && !s.error; }).length + ' source(s)' +
+        (busy.length ? ' · refreshing ' + busy.map(function (s) { return s.label; }).join(', ') + '...' : '') +
         (errs.length ? ' · ' + errs.map(function (s) { return s.label + ': ' + s.error; }).join('; ') : '');
       if (!sources.some(function (s) { return s.configured; })) {
         agendaList.innerHTML = '<p class="muted">No discovery sources configured yet. ' +
@@ -113,8 +127,9 @@
         return;
       }
       renderCurrent();
+      schedulePoll(data.refreshing);
     }).catch(function () {
-      agendaList.innerHTML = '<p class="muted">Failed to load.</p>';
+      if (!poll) agendaList.innerHTML = '<p class="muted">Failed to load.</p>';
     });
   }
 

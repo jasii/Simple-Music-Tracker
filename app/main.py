@@ -3,6 +3,8 @@
 import json
 import os
 import sqlite3
+import threading
+import time
 from datetime import date, datetime, timedelta
 
 from flask import (
@@ -664,6 +666,45 @@ def _flag_known_artists(items):
         it["following"] = sub in ("subscribed", "notify")
 
 
+# Background Discover refreshes. Scraping (especially Metacritic, which enriches
+# every release via MusicBrainz at 1 req/sec) takes minutes, so it must never run
+# inside a request - that would hang the page. Instead we serve whatever is in the
+# DB cache immediately and refresh in a daemon thread; the page polls until done.
+_discover_jobs = {}     # source key -> running Thread
+_discover_errors = {}   # source key -> last error string (or None)
+_discover_jobs_lock = threading.Lock()
+
+
+def _discover_ttl_seconds():
+    try:
+        return max(float(db.get_setting("discover_refresh_hours") or 24), 1) * 3600
+    except (TypeError, ValueError):
+        return 24 * 3600
+
+
+def _is_refreshing(key):
+    job = _discover_jobs.get(key)
+    return job is not None and job.is_alive()
+
+
+def _kick_refresh(key, src):
+    """Start a background scrape for *src* unless one is already running."""
+    with _discover_jobs_lock:
+        if _is_refreshing(key):
+            return
+
+        def worker():
+            try:
+                src["fetch"](force=True)
+                _discover_errors[key] = None
+            except Exception as exc:  # noqa: BLE001 - surfaced to the UI instead
+                _discover_errors[key] = str(exc)
+
+        thread = threading.Thread(target=worker, daemon=True)
+        _discover_jobs[key] = thread
+        thread.start()
+
+
 @app.route("/api/discover/sources")
 def api_discover_sources():
     """List the available discovery sources and whether each is configured."""
@@ -680,33 +721,43 @@ def api_discover_releases():
     Each item is tagged with its `source` / `source_label`; the response also
     reports per-source status (configured / count / any error).
 
-    ?refresh=<source-key> re-scrapes just that source; ?refresh=all (or =1)
-    re-scrapes every source. Otherwise the persisted cache is used until stale.
+    Always returns immediately from the persisted DB cache. A source is
+    refreshed in the background (never inline) when its cache is stale/empty, or
+    when asked: ?refresh=<source-key> for one, ?refresh=all (or =1) for every
+    source. Each source reports `refreshing` so the page can poll until done.
     """
     refresh = request.args.get("refresh")
     refresh_all = refresh in ("all", "1")
+    ttl = _discover_ttl_seconds()
     items = []
     sources = []
     for key, src in DISCOVER_SOURCES.items():
         entry = {"key": key, "label": src["label"], "configured": src["configured"](),
-                 "count": 0, "error": None}
+                 "count": 0, "error": _discover_errors.get(key)}
         if entry["configured"]:
-            try:
-                src_items, cached = src["fetch"](force=refresh_all or refresh == key)
-                entry["count"] = len(src_items)
-                entry["cached"] = cached
-                for it in src_items:
-                    tagged = dict(it)
-                    tagged["source"] = key
-                    tagged["source_label"] = src["label"]
-                    items.append(tagged)
-            except Exception as exc:  # noqa: BLE001
-                entry["error"] = str(exc)
+            fetched_at, cached_items = db.get_discover_cache(key)
+            stale = (not fetched_at) or (not cached_items) or (time.time() - fetched_at > ttl)
+            if refresh_all or refresh == key or stale:
+                _kick_refresh(key, src)
+            entry["count"] = len(cached_items)
+            entry["fetched_at"] = fetched_at
+            entry["stale"] = stale
+            entry["refreshing"] = _is_refreshing(key)
+            for it in cached_items:
+                tagged = dict(it)
+                tagged["source"] = key
+                tagged["source_label"] = src["label"]
+                items.append(tagged)
         sources.append(entry)
 
     _flag_known_artists(items)
     items.sort(key=lambda r: r.get("normalized_date") or "9999")
-    return jsonify({"sources": sources, "count": len(items), "items": items})
+    return jsonify({
+        "sources": sources,
+        "count": len(items),
+        "items": items,
+        "refreshing": any(s.get("refreshing") for s in sources),
+    })
 
 
 @app.route("/api/artists/add", methods=["POST"])
