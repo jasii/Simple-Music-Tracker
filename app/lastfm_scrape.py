@@ -101,6 +101,7 @@ def parse_releases(html):
             "release_date": date_text,
             "normalized_date": _parse_date(date_text),
             "context": context,
+            "primary_type": "Album",  # the coming-soon list is album releases
             "image": img["src"] if img and img.has_attr("src") else None,
         })
 

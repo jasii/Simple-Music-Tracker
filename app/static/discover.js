@@ -77,6 +77,7 @@
       (r.context ? '<div class="muted discover-context">' + SMT.esc(r.context) + '</div>' : '') +
       genres +
       ((r.artist && r.album) ? SMT.releaseIcons(r.artist, r.album, r.mbid) : '') +
+      (r.primary_type ? '<div class="release-type"><span class="genre-tag">' + SMT.esc(r.primary_type) + '</span></div>' : '') +
       '<div class="discover-actions">' + action + '</div>' +
       '</div></div>'
     );
@@ -120,10 +121,11 @@
       }
       const checked = hidden.has(s.key) ? '' : ' checked';
       const err = s.error ? ' <span class="muted">(error)</span>' : '';
-      return '<span class="source-chip src-' + SMT.esc(s.key) + '"><label><input type="checkbox" data-source="' + SMT.esc(s.key) + '"' +
-        checked + '> ' + SMT.esc(s.label) + err + '</label>' +
+      // Checkbox sits outside the rounded chip; the colored pill holds the label + refresh.
+      return '<span class="source-filter"><input type="checkbox" data-source="' + SMT.esc(s.key) + '"' + checked + '>' +
+        '<span class="source-chip src-' + SMT.esc(s.key) + '">' + SMT.esc(s.label) + err +
         '<button type="button" class="source-refresh" data-refresh="' + SMT.esc(s.key) + '"' +
-        ' title="Refresh ' + SMT.esc(s.label) + '">&#x21bb;</button></span>';
+        ' title="Refresh ' + SMT.esc(s.label) + '">&#x21bb;</button></span></span>';
     }).join('');
   }
 

@@ -162,6 +162,15 @@ def parse_releases(html):
         context = comment_td.get_text(strip=True) if comment_td else None
         context = context or None
 
+        # Metacritic is an album calendar; its note sometimes flags EP/single.
+        low = (context or "").lower()
+        if "[ep]" in low or " ep" in low:
+            primary_type = "EP"
+        elif "single" in low:
+            primary_type = "Single"
+        else:
+            primary_type = "Album"
+
         items.append({
             "album": album,
             "album_url": None,
@@ -171,6 +180,7 @@ def parse_releases(html):
             "release_date": current_date,
             "normalized_date": _parse_date(current_date),
             "context": context,
+            "primary_type": primary_type,
             "image": None,
         })
 

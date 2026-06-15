@@ -119,6 +119,8 @@ DEFAULT_SETTINGS = {
     "nav_hidden": "",                       # comma separated list of hidden nav pages
     "prefer_album_artist": "true",          # use the album-artist tag before the track artist
     "hide_page_descriptions": "false",      # hide the muted intro text on list pages
+    "cache_images": "true",                 # save album art / artist images to disk
+    "purge_cache_on_unfollow": "true",      # auto-delete an artist's cache when unfollowed
 }
 
 # Release types that may be monitored. Order is the display order.

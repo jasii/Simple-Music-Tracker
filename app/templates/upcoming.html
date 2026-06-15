@@ -4,7 +4,14 @@
 {% block content %}
 <div class="page-head">
   <h1>Upcoming Releases</h1>
-  {% include "_view_toggle.html" %}
+  <div class="discover-controls">
+    <div class="source-filters" id="type-filters">
+      <span class="source-chip"><label><input type="checkbox" class="type-toggle" value="Album" checked> Albums</label></span>
+      <span class="source-chip"><label><input type="checkbox" class="type-toggle" value="EP" checked> EPs</label></span>
+      <span class="source-chip"><label><input type="checkbox" class="type-toggle" value="Single" checked> Singles</label></span>
+    </div>
+    {% include "_view_toggle.html" %}
+  </div>
 </div>
 {% if not hide_page_descriptions %}<p class="muted">New and upcoming albums from artists you follow.</p>{% endif %}
 

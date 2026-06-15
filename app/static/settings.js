@@ -136,6 +136,17 @@
   wireHealthCheck('btn-test-key', 'key-result', '/api/health/lastfm-key');
   wireHealthCheck('btn-test-cookie', 'cookie-result', '/api/health/lastfm-cookie');
 
+  // --- cache toggles (saved immediately; they live outside the main form) ---
+  ['cache_images', 'purge_cache_on_unfollow'].forEach(function (key) {
+    const cb = document.getElementById(key);
+    if (!cb) return;
+    cb.addEventListener('change', function () {
+      const body = {};
+      body[key] = cb.checked ? 'true' : 'false';
+      SMT.postJSON('/api/settings', body);
+    });
+  });
+
   // --- cache maintenance: show sizes, purge stale data ---
   function fmtBytes(n) {
     if (!n) return '0 B';

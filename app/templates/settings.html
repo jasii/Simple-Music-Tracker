@@ -196,9 +196,21 @@
 
 <fieldset class="settings-form">
   <legend>Cache maintenance</legend>
-  <p class="hint">Unfollowing an artist keeps their cached data. This clears cached
-    discographies, album details, tracked releases and album-art files for artists
-    you no longer follow, to reclaim disk space.</p>
+  <div class="monitor-types">
+    <label><input type="checkbox" id="cache_images" value="true"
+      {{ 'checked' if settings.cache_images != 'false' }}> Cache images on disk</label>
+  </div>
+  <p class="hint">Saves album art and artist images under the data folder so they load fast and offline.
+    Turn off to load images from their source URL instead (uses no disk).</p>
+
+  <div class="monitor-types">
+    <label><input type="checkbox" id="purge_cache_on_unfollow" value="true"
+      {{ 'checked' if settings.purge_cache_on_unfollow != 'false' }}> Delete cached data when unfollowing</label>
+  </div>
+  <p class="hint">When you unfollow an artist, immediately remove their cached discography, album
+    details, tracked releases and artwork. Turn off to keep it and purge manually below.</p>
+
+  <p class="hint">Clears cached data for artists you no longer follow, to reclaim disk space.</p>
   <p id="cache-stats" class="muted">Checking cache size...</p>
   <div class="tool-row">
     <button type="button" id="btn-purge-cache">Purge stale data</button>

@@ -12,7 +12,7 @@
     <h1>{{ artist.name }}</h1>
     <div class="release-icons">
       {% if artist.mbid %}<a href="https://musicbrainz.org/artist/{{ artist.mbid }}" target="_blank" rel="noopener noreferrer"><img src="/static/musicbrainz.svg" alt="MusicBrainz" class="icon-medium"></a>{% endif %}
-      <a href="{{ artist.lastfm_url or 'https://www.last.fm/music/' ~ (artist.name | urlencode) }}" target="_blank" rel="noopener noreferrer"><img src="/static/last-fm-light.svg" alt="Last.fm" class="icon-medium"></a>
+      <a href="{{ artist.lastfm_url or 'https://www.last.fm/music/' ~ (artist.name | urlencode) }}" target="_blank" rel="noopener noreferrer"><img src="/static/last-fm.svg" alt="Last.fm" class="icon-medium"></a>
       <a href="https://music.youtube.com/search?q={{ artist.name | urlencode }}" target="_blank" rel="noopener noreferrer"><img src="/static/youtube-music.svg" alt="YouTube Music" class="icon-medium"></a>
     </div>
     <p class="muted">{{ artist.track_count }} tracks in library

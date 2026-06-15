@@ -234,7 +234,11 @@ def art_proxy():
     url = request.args.get("u")
     if not url:
         abort(404)
-    path = artwork.cached_path(url) or artwork.fetch(url)
+    path = artwork.cached_path(url)
+    # Only download + save new images when caching is enabled; otherwise serve
+    # anything already cached and fall back to the remote URL for the rest.
+    if not path and (db.get_setting("cache_images") or "true") != "false":
+        path = artwork.fetch(url)
     if path:
         resp = send_file(path, mimetype=artwork.content_type(path))
         resp.headers["Cache-Control"] = "public, max-age=604800"
@@ -436,6 +440,17 @@ def api_artist(artist_id):
     return jsonify(data)
 
 
+def _purge_on_unfollow(artist_ids):
+    """When enabled, drop cached data for artists that were just unfollowed."""
+    if (db.get_setting("purge_cache_on_unfollow") or "true") == "false":
+        return
+    for aid in artist_ids:
+        try:
+            maintenance.purge_artist(aid)
+        except Exception:  # noqa: BLE001 - cleanup must never break the request
+            pass
+
+
 @app.route("/api/artists/<int:artist_id>/subscription", methods=["POST"])
 def api_set_subscription(artist_id):
     payload = request.get_json(silent=True) or {}
@@ -459,6 +474,8 @@ def api_set_subscription(artist_id):
     # Newly following an artist? Kick off a metadata fetch in the background.
     if state in ("subscribed", "notify"):
         tracker.enqueue_artist(artist_id)
+    elif state == "none":
+        _purge_on_unfollow([artist_id])
 
     return jsonify({"id": artist_id, "subscription": state})
 
@@ -720,6 +737,8 @@ def api_track_by_name():
 
     if state != "none":
         tracker.enqueue_artist(artist_id)
+    else:
+        _purge_on_unfollow([artist_id])
     return jsonify({"id": artist_id, "name": name, "subscription": state, "created": created})
 
 
@@ -1004,6 +1023,8 @@ def api_bulk_subscription():
     if state in ("subscribed", "notify"):
         for artist_id in ids:
             tracker.enqueue_artist(artist_id)
+    elif state == "none":
+        _purge_on_unfollow(ids)
 
     return jsonify({"updated": len(ids), "state": state})
 
@@ -1230,7 +1251,7 @@ def api_settings():
         elif key == "nav_hidden":
             value = ",".join([k.strip() for k in str(value).split(",") if k.strip() in PAGE_DEFS])
         elif key in ("prefer_album_artist", "discover_lastfm_enabled",
-                     "discover_metacritic_enabled", "hide_page_descriptions"):
+                     "discover_metacritic_enabled", "hide_page_descriptions", "cache_images"):
             value = "true" if str(value).lower() in ("true", "1", "on", "yes") else "false"
         elif key == "discover_refresh_hours":
             try:

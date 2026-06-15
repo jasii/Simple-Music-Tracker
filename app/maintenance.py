@@ -114,6 +114,56 @@ def cache_stats():
     }
 
 
+def purge_artist(artist_id):
+    """Delete one artist's cached data + orphaned artwork. Returns bytes freed.
+
+    Used to auto-clean right after an unfollow. The artist must already be
+    unfollowed so their data counts as stale.
+    """
+    conn = db.get_connection()
+    try:
+        a = conn.execute(
+            "SELECT mbid, sort_name FROM artists WHERE id = ?", (artist_id,)
+        ).fetchone()
+        if a is None:
+            return {"freed_bytes": 0}
+        mbid, sort_name = a["mbid"], a["sort_name"]
+        keys = []
+        json_freed = 0
+        for r in conn.execute("SELECT cache_key, LENGTH(payload) AS n FROM json_cache"):
+            k = r["cache_key"]
+            if (mbid and k == "disco:" + mbid) or (
+                k.startswith("album:") and k[len("album:"):].split("|", 1)[0] == (sort_name or "")
+            ):
+                keys.append(k)
+                json_freed += r["n"] or 0
+        names, mbids = _followed_keys(conn)
+        kept = _kept_art_keys(conn, names, mbids)
+        stale_files = [(path, size) for name, path, size in _art_files() if name not in kept]
+    finally:
+        conn.close()
+
+    art_freed = 0
+    for path, size in stale_files:
+        try:
+            os.remove(path)
+            art_freed += size
+        except OSError:
+            pass
+
+    with db._write_lock:
+        conn = db.get_connection()
+        try:
+            for key in keys:
+                conn.execute("DELETE FROM json_cache WHERE cache_key = ?", (key,))
+            conn.execute("DELETE FROM releases WHERE artist_id = ?", (artist_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    return {"freed_bytes": json_freed + art_freed}
+
+
 def purge_stale():
     """Delete stale caches/releases/artwork. Returns counts and bytes freed."""
     conn = db.get_connection()

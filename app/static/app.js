@@ -64,7 +64,7 @@ window.SMT = {
     const al = encodeURIComponent(album || '');
     const links = [
       '<a href="https://www.last.fm/music/' + a + '/' + al + '" target="_blank" rel="noopener noreferrer">' +
-      '<img src="/static/last-fm-light.svg" alt="Last.fm" class="icon-medium"></a>',
+      '<img src="/static/last-fm.svg" alt="Last.fm" class="icon-medium"></a>',
     ];
     // Direct release-group link when we know the mbid, else a MusicBrainz search.
     const mbHref = mbid
