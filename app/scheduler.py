@@ -9,7 +9,7 @@ re-read from settings each tick so changes take effect without a restart:
 import threading
 import time
 
-from . import db, lastfm_scrape, tracker
+from . import db, lastfm_scrape, metacritic_scrape, tracker
 
 _thread = None
 _started = False
@@ -40,13 +40,18 @@ def _loop():
             except Exception:  # noqa: BLE001 - never let the scheduler thread die
                 pass
 
-        if (db.get_setting("lastfm_cookie") or "").strip():
-            if now - last_discover >= _hours("discover_refresh_hours", 24, 1) * 3600:
-                last_discover = now
+        if now - last_discover >= _hours("discover_refresh_hours", 24, 1) * 3600:
+            last_discover = now
+            # Last.fm only if a cookie is set; Metacritic is public, always scrape.
+            if (db.get_setting("lastfm_cookie") or "").strip():
                 try:
                     lastfm_scrape.fetch_coming_soon(force=True)
                 except Exception:  # noqa: BLE001
                     pass
+            try:
+                metacritic_scrape.fetch_coming_soon(force=True)
+            except Exception:  # noqa: BLE001
+                pass
 
         # Fire any 'notify' webhooks that have reached their trigger time.
         try:

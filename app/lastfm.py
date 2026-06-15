@@ -63,6 +63,51 @@ def _placeholder(url):
     return url and "2a96cbd8b46e442fc41c2b86b821562f" in url
 
 
+def _best_image(images):
+    """Pick the largest non-placeholder image URL from a Last.fm image list."""
+    by_size = {img.get("size"): img.get("#text") for img in (images or [])}
+    for size in ("mega", "extralarge", "large", "medium"):
+        url = by_size.get(size)
+        if url and not _placeholder(url):
+            return url
+    return None
+
+
+def get_album_info(artist, album):
+    """Return {image_url, genres} for a release, or {} on failure.
+
+    One call to album.getInfo gives both the cover image and the album's
+    top tags (used as genres). Needs a configured Last.fm API key.
+    """
+    api_key = db.get_setting("lastfm_api_key")
+    if not api_key or not artist or not album:
+        return {}
+    data = _lastfm_get(
+        {
+            "method": "album.getinfo",
+            "artist": artist,
+            "album": album,
+            "api_key": api_key,
+            "format": "json",
+            "autocorrect": 1,
+        }
+    )
+    if not data:
+        return {}
+    info = data.get("album")
+    if not info:
+        return {}
+
+    tags = info.get("tags") or {}
+    tag_list = tags.get("tag") if isinstance(tags, dict) else None
+    genres = [t.get("name") for t in (tag_list or []) if t.get("name")]
+
+    return {
+        "image_url": _best_image(info.get("image")),
+        "genres": genres,
+    }
+
+
 def get_artist_info(name):
     """Return {bio, lastfm_url, image_url} for an artist, or {} on failure."""
     api_key = db.get_setting("lastfm_api_key")

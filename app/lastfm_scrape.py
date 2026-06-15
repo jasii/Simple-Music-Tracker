@@ -28,7 +28,8 @@ USER_AGENT = (
 
 MAX_PAGES = 15
 
-_cache = {"at": 0.0, "items": []}
+SOURCE = "lastfm"
+# Serialise scrapes so two callers can't hammer Last.fm at once.
 _lock = threading.Lock()
 
 
@@ -119,34 +120,39 @@ def _fetch_page(page):
 
 
 def fetch_coming_soon(force=False):
-    """Return (items, cached). Raises RuntimeError if no cookie is configured."""
-    with _lock:
-        if not force and _cache["items"] and (time.time() - _cache["at"]) < _cache_ttl():
-            return list(_cache["items"]), True
+    """Return (items, cached). Raises RuntimeError if no cookie is configured.
+
+    Results are persisted in the DB and reused until older than
+    discover_refresh_hours (or *force* re-scrapes now).
+    """
+    if not force:
+        fetched_at, items = db.get_discover_cache(SOURCE)
+        if items and fetched_at and (time.time() - fetched_at) < _cache_ttl():
+            return items, True
 
     if not (db.get_setting("lastfm_cookie") or "").strip():
         raise RuntimeError("Last.fm session cookie not configured in Settings")
 
-    items = []
-    for page in range(1, MAX_PAGES + 1):
-        html = _fetch_page(page)
-        page_items, has_next = parse_releases(html)
-        items.extend(page_items)
-        if not page_items or not has_next:
-            break
-        time.sleep(1)  # be polite between page requests
-
     with _lock:
-        _cache["at"] = time.time()
-        _cache["items"] = items
-    return list(items), False
+        items = []
+        for page in range(1, MAX_PAGES + 1):
+            html = _fetch_page(page)
+            page_items, has_next = parse_releases(html)
+            items.extend(page_items)
+            if not page_items or not has_next:
+                break
+            time.sleep(1)  # be polite between page requests
+
+    db.set_discover_cache(SOURCE, items)
+    return items, False
 
 
 def cache_age():
     """Seconds since the cache was last filled, or None if empty."""
-    if not _cache["items"]:
+    fetched_at, items = db.get_discover_cache(SOURCE)
+    if not items or not fetched_at:
         return None
-    return int(time.time() - _cache["at"])
+    return int(time.time() - fetched_at)
 
 
 def check_cookie():

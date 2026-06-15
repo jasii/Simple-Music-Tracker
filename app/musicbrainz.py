@@ -247,6 +247,44 @@ def fetch_discography(mbid, use_cache=True):
     return items
 
 
+def find_release_art(name, title, mbid=None):
+    """Best-effort cover art + genres for a named release.
+
+    Resolves the artist, finds the release-group whose title matches *title*
+    (case-insensitive), and returns {image_url, genres}. Genres come from the
+    release-group's MusicBrainz genres (community-voted). Returns {} if nothing
+    matches. Used as a fallback when Last.fm has no album data.
+    """
+    if not name or not title:
+        return {}
+    try:
+        if not mbid:
+            mbid = resolve_mbid(name)
+        if not mbid:
+            return {}
+        wanted = title.strip().lower()
+        match = None
+        for rg in fetch_release_groups(mbid, {"album", "ep"}):
+            if (rg.get("title") or "").strip().lower() == wanted:
+                match = rg
+                break
+        if match is None:
+            return {}
+        # Re-fetch the release-group with genres included (browse omits them).
+        detail = _rate_limited_get(
+            f"{MB_BASE}/release-group/{match['id']}", {"fmt": "json", "inc": "genres"}
+        )
+        ranked = sorted(
+            (g for g in (detail.get("genres") or []) if g.get("name")),
+            key=lambda g: g.get("count", 0),
+            reverse=True,
+        )
+        genres = [g["name"] for g in ranked]
+        return {"image_url": cover_art_url(match["id"]), "genres": genres}
+    except requests.RequestException:
+        return {}
+
+
 def find_upcoming(name, mbid=None, types=None):
     """Resolve an artist and return a list of upcoming/recent release dicts.
 

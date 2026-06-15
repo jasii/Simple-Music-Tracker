@@ -15,7 +15,17 @@ from flask import (
     url_for,
 )
 
-from . import db, lastfm, lastfm_scrape, musicbrainz, scanner, scheduler, tracker, webhooks
+from . import (
+    db,
+    lastfm,
+    lastfm_scrape,
+    metacritic_scrape,
+    musicbrainz,
+    scanner,
+    scheduler,
+    tracker,
+    webhooks,
+)
 
 app = Flask(__name__)
 
@@ -623,6 +633,12 @@ DISCOVER_SOURCES = {
         "configured": lambda: bool((db.get_setting("lastfm_cookie") or "").strip()),
         "fetch": lastfm_scrape.fetch_coming_soon,
     },
+    "metacritic": {
+        "label": "Metacritic",
+        # Public page - no auth needed, so always available.
+        "configured": lambda: True,
+        "fetch": metacritic_scrape.fetch_coming_soon,
+    },
 }
 
 
@@ -663,8 +679,12 @@ def api_discover_releases():
 
     Each item is tagged with its `source` / `source_label`; the response also
     reports per-source status (configured / count / any error).
+
+    ?refresh=<source-key> re-scrapes just that source; ?refresh=all (or =1)
+    re-scrapes every source. Otherwise the persisted cache is used until stale.
     """
-    force = request.args.get("refresh") == "1"
+    refresh = request.args.get("refresh")
+    refresh_all = refresh in ("all", "1")
     items = []
     sources = []
     for key, src in DISCOVER_SOURCES.items():
@@ -672,7 +692,7 @@ def api_discover_releases():
                  "count": 0, "error": None}
         if entry["configured"]:
             try:
-                src_items, cached = src["fetch"](force=force)
+                src_items, cached = src["fetch"](force=refresh_all or refresh == key)
                 entry["count"] = len(src_items)
                 entry["cached"] = cached
                 for it in src_items:

@@ -4,9 +4,11 @@ No ORM, just the stdlib sqlite3 module. A single connection per request is
 created on demand and stored on Flask's application context.
 """
 
+import json
 import os
 import sqlite3
 import threading
+import time
 
 DB_PATH = os.environ.get("SMT_DB_PATH", os.path.join("data", "tracker.db"))
 
@@ -58,6 +60,14 @@ CREATE INDEX IF NOT EXISTS idx_releases_date ON releases (release_date);
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT
+);
+
+-- Persisted Discover scrape results, one row per source ('lastfm', 'metacritic'),
+-- so releases survive a restart and only re-scrape when stale or forced.
+CREATE TABLE IF NOT EXISTS discover_cache (
+    source      TEXT PRIMARY KEY,
+    fetched_at  REAL NOT NULL,      -- epoch seconds of the last successful scrape
+    payload     TEXT NOT NULL       -- JSON array of release items
 );
 
 CREATE TABLE IF NOT EXISTS scan_log (
@@ -200,6 +210,44 @@ def set_setting(key, value):
                 "INSERT INTO settings (key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+# --- discover cache ---------------------------------------------------------
+
+def get_discover_cache(source):
+    """Return (fetched_at, items) for a source, or (None, []) if absent/corrupt."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT fetched_at, payload FROM discover_cache WHERE source = ?",
+            (source,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None, []
+    try:
+        items = json.loads(row["payload"])
+    except (TypeError, ValueError):
+        return None, []
+    return row["fetched_at"], items
+
+
+def set_discover_cache(source, items):
+    """Store a source's scrape result, stamped with the current time."""
+    payload = json.dumps(items)
+    with _write_lock:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO discover_cache (source, fetched_at, payload) "
+                "VALUES (?, ?, ?) ON CONFLICT(source) DO UPDATE SET "
+                "fetched_at = excluded.fetched_at, payload = excluded.payload",
+                (source, time.time(), payload),
             )
             conn.commit()
         finally:

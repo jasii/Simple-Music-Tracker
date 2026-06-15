@@ -40,6 +40,11 @@
     const album = r.album_url
       ? '<a href="' + SMT.esc(r.album_url) + '" target="_blank" rel="noopener">' + SMT.esc(r.album || '') + '</a>'
       : SMT.esc(r.album || '');
+    const genres = (r.genres && r.genres.length)
+      ? '<div class="discover-genres">' + r.genres.map(function (g) {
+          return '<span class="genre-tag">' + SMT.esc(g) + '</span>';
+        }).join('') + '</div>'
+      : '';
     const action = r.following
       ? '<span class="badge">following</span>'
       : '<button type="button" class="discover-track" data-artist="' + SMT.esc(r.artist || '') + '">Track artist</button>';
@@ -50,6 +55,7 @@
       '<div class="discover-artist">' + artist + '</div>' +
       (r.normalized_date ? '<div class="when">' + fmtDate(r.normalized_date) + '</div>' : '') +
       (r.context ? '<div class="muted discover-context">' + SMT.esc(r.context) + '</div>' : '') +
+      genres +
       '<div class="discover-actions">' + action + '</div>' +
       '</div></div>'
     );
@@ -76,8 +82,10 @@
       }
       const checked = hidden.has(s.key) ? '' : ' checked';
       const err = s.error ? ' <span class="muted">(error)</span>' : '';
-      return '<label class="source-chip"><input type="checkbox" data-source="' + SMT.esc(s.key) + '"' +
-        checked + '> ' + SMT.esc(s.label) + err + '</label>';
+      return '<span class="source-chip"><label><input type="checkbox" data-source="' + SMT.esc(s.key) + '"' +
+        checked + '> ' + SMT.esc(s.label) + err + '</label>' +
+        '<button type="button" class="source-refresh" data-refresh="' + SMT.esc(s.key) + '"' +
+        ' title="Refresh ' + SMT.esc(s.label) + '">&#x21bb;</button></span>';
     }).join('');
   }
 
@@ -86,9 +94,11 @@
     else { RelView.agenda(agendaList, visibleItems(), agendaRow, 'No releases to show. Pick a source or add one in Settings.'); }
   }
 
+  // refresh: falsy = use cache, a source key = re-scrape that source, 'all' = every source.
   function load(refresh) {
     agendaList.innerHTML = '<p class="muted">' + (refresh ? 'Refreshing...' : 'Loading...') + '</p>';
-    SMT.getJSON('/api/discover/releases' + (refresh ? '?refresh=1' : '')).then(function (data) {
+    const q = refresh ? ('?refresh=' + encodeURIComponent(refresh)) : '';
+    SMT.getJSON('/api/discover/releases' + q).then(function (data) {
       sources = data.sources || [];
       allItems = data.items || [];
       loaded = true;
@@ -114,6 +124,12 @@
     if (e.target.checked) hidden.delete(key); else hidden.add(key);
     saveHidden();
     renderCurrent();
+  });
+
+  sourceFilters.addEventListener('click', function (e) {
+    const btn = e.target.closest('.source-refresh');
+    if (!btn) return;
+    load(btn.getAttribute('data-refresh'));
   });
 
   agendaList.addEventListener('click', function (e) {
@@ -148,7 +164,7 @@
     const view = e.target.getAttribute('data-view');
     if (view) showView(view);
   });
-  document.getElementById('discover-refresh').addEventListener('click', function () { load(true); });
+  document.getElementById('discover-refresh').addEventListener('click', function () { load('all'); });
 
   let saved = 'agenda';
   try { saved = localStorage.getItem('discoverView') || 'agenda'; } catch (e) {}
