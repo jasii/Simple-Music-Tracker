@@ -24,7 +24,9 @@
     <a class="brand" href="{{ url_for('home') }}">Simple Music Tracker</a>
     <nav class="nav">
       {% for item in nav_items %}
+      {% if not item.hidden %}
       <a href="{{ url_for(item.endpoint) }}" class="{{ 'on' if active == item.key }}">{{ item.label }}</a>
+      {% endif %}
       {% endfor %}
       <button id="theme-toggle" type="button" class="theme-toggle" title="Toggle theme">theme</button>
     </nav>

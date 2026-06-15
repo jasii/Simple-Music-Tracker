@@ -4,27 +4,28 @@
   const form = document.getElementById('settings-form');
   const saveResult = document.getElementById('save-result');
 
-  // --- reorderable list (nav tabs) with drag-and-drop + Up/Down ---
+  // --- reorderable list (nav tabs) with drag-and-drop ---
   // The first item is highlighted as the home page.
-  function wireReorder(listId, orderInputId) {
+  function wireReorder(listId, orderInputId, hiddenInputId) {
     const list = document.getElementById(listId);
     const orderInput = document.getElementById(orderInputId);
-    if (!list || !orderInput) return;
+    const hiddenInput = document.getElementById(hiddenInputId);
+    if (!list || !orderInput || !hiddenInput) return;
 
     function sync() {
       const lis = Array.from(list.querySelectorAll('li'));
       orderInput.value = lis.map(function (li) { return li.getAttribute('data-key'); }).join(',');
       lis.forEach(function (li, i) { li.classList.toggle('is-home', i === 0); });
+      
+      const hidden = lis.filter(function (li) {
+        const cb = li.querySelector('.nav-show-toggle');
+        return cb && !cb.checked;
+      }).map(function (li) { return li.getAttribute('data-key'); });
+      hiddenInput.value = hidden.join(',');
     }
 
-    list.addEventListener('click', function (e) {
-      const li = e.target.closest('li');
-      if (!li) return;
-      if (e.target.classList.contains('nav-up') && li.previousElementSibling) {
-        list.insertBefore(li, li.previousElementSibling);
-        sync();
-      } else if (e.target.classList.contains('nav-down') && li.nextElementSibling) {
-        list.insertBefore(li.nextElementSibling, li);
+    list.addEventListener('change', function (e) {
+      if (e.target.classList.contains('nav-show-toggle')) {
         sync();
       }
     });
@@ -54,7 +55,7 @@
     sync();
   }
 
-  wireReorder('nav-order-list', 'nav_order');
+  wireReorder('nav-order-list', 'nav_order', 'nav_hidden');
 
   // Show the webhook lead-time fields only for the "before release" trigger.
   const trigger = document.getElementById('webhook_trigger');

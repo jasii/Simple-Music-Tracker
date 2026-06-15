@@ -143,8 +143,9 @@ def _home_key():
 def inject_nav():
     """Make the (ordered) nav items and labels available to every template."""
     order = normalize_nav_order(db.get_setting("nav_order"))
+    hidden_keys = set((db.get_setting("nav_hidden") or "").split(","))
     items = [
-        {"key": k, "endpoint": PAGE_DEFS[k][0], "label": PAGE_DEFS[k][1]}
+        {"key": k, "endpoint": PAGE_DEFS[k][0], "label": PAGE_DEFS[k][1], "hidden": k in hidden_keys and k != "settings"}
         for k in order
     ]
     return {"nav_items": items}
@@ -1013,6 +1014,8 @@ def api_settings():
             value = value if value in PAGE_DEFS else DEFAULT_HOME
         elif key == "nav_order":
             value = ",".join(normalize_nav_order(value))
+        elif key == "nav_hidden":
+            value = ",".join([k.strip() for k in str(value).split(",") if k.strip() in PAGE_DEFS])
         elif key == "prefer_album_artist":
             value = "true" if str(value).lower() in ("true", "1", "on", "yes") else "false"
         elif key == "discover_refresh_hours":

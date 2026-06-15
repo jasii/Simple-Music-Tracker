@@ -141,8 +141,9 @@
 
   <fieldset>
     <legend>Navigation &amp; home page</legend>
-    <p class="hint">Drag the tabs to reorder (or use Up/Down). The tab at the top is your home page.</p>
+    <p class="hint">Drag the tabs to reorder. The tab at the top is your home page.</p>
     <input type="hidden" name="nav_order" id="nav_order" value="{{ settings.nav_order }}">
+    <input type="hidden" name="nav_hidden" id="nav_hidden" value="{{ settings.nav_hidden }}">
     <ul class="nav-order" id="nav-order-list">
       {% for item in nav_items %}
       <li data-key="{{ item.key }}" draggable="true">
@@ -150,8 +151,9 @@
         <span class="nav-label">{{ item.label }}</span>
         <span class="nav-home-badge">home</span>
         <span class="nav-order-buttons">
-          <button type="button" class="nav-up" title="Move up">Up</button>
-          <button type="button" class="nav-down" title="Move down">Down</button>
+          {% if item.key != 'settings' %}
+          <label><input type="checkbox" class="nav-show-toggle" {{ 'checked' if not item.hidden else '' }}> Show</label>
+          {% endif %}
         </span>
       </li>
       {% endfor %}

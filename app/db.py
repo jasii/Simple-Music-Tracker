@@ -94,6 +94,7 @@ DEFAULT_SETTINGS = {
     "discography_autohide": "",             # categories collapsed by default on artist pages
     "home_page": "upcoming",                # which page '/' opens (Upcoming on first run)
     "nav_order": "artists,following,upcoming,discover,ignored,settings",
+    "nav_hidden": "",                       # comma separated list of hidden nav pages
     "prefer_album_artist": "true",          # use the album-artist tag before the track artist
 }
 
