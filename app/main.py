@@ -14,10 +14,8 @@ from flask import (
     abort,
     jsonify,
     redirect,
-    render_template,
     request,
     send_file,
-    url_for,
 )
 
 from . import (
@@ -151,77 +149,11 @@ def normalize_nav_order(value):
     return _ordered_subset(value, PAGE_KEYS)
 
 
-def _home_key():
-    # The home page is simply whichever tab is first in the navigation order.
-    order = normalize_nav_order(db.get_setting("nav_order"))
-    return order[0] if order else DEFAULT_HOME
-
-
-@app.context_processor
-def inject_nav():
-    """Make the (ordered) nav items and labels available to every template."""
-    order = normalize_nav_order(db.get_setting("nav_order"))
-    hidden_keys = set((db.get_setting("nav_hidden") or "").split(","))
-    # The home page (first tab) and Settings can never be hidden.
-    home_key = order[0] if order else None
-    items = [
-        {"key": k, "endpoint": PAGE_DEFS[k][0], "label": PAGE_DEFS[k][1],
-         "hidden": k in hidden_keys and k != "settings" and k != home_key}
-        for k in order
-    ]
-    return {"nav_items": items}
-
-
 # --- pages ------------------------------------------------------------------
 
-@app.route("/")
-def home():
-    # The home page is configurable; send the user to their chosen page.
-    return redirect(url_for(PAGE_DEFS[_home_key()][0]))
-
-
-@app.route("/artists")
-def artists_page():
-    return render_template("index.html", **_base_context(active="artists"))
-
-
-@app.route("/subscriptions")
-def subscriptions_page():
-    return render_template("following.html", **_base_context(active="following"))
-
-
-@app.route("/upcoming")
-def upcoming_page():
-    return render_template("upcoming.html", **_base_context(active="upcoming"))
-
-
-@app.route("/discover")
-def discover_page():
-    return render_template("discover.html", **_base_context(active="discover"))
-
-
-@app.route("/ignored")
-def ignored_page():
-    return render_template("ignored.html", **_base_context(active="ignored"))
-
-
-@app.route("/artist/<int:artist_id>")
-def artist_page(artist_id):
-    conn = db.get_connection()
-    try:
-        artist = conn.execute(
-            "SELECT * FROM artists WHERE id = ?", (artist_id,)
-        ).fetchone()
-    finally:
-        conn.close()
-    if artist is None:
-        abort(404)
-    ctx = _base_context(active="artists")
-    ctx["artist"] = _row_to_dict(artist)
-    # Strip Last.fm's trailing "Read more" link from bios stored before this fix.
-    ctx["artist"]["bio"] = lastfm.clean_bio(ctx["artist"].get("bio"))
-    ctx["autohide"] = db.get_setting("discography_autohide") or ""
-    return render_template("artist.html", **ctx)
+# Pages are served by the React single-page app (see serve_spa below); the nav
+# config those tabs need is exposed at /api/nav, and the routes that used to
+# render Jinja templates have moved to the client (React Router).
 
 
 @app.route("/art")
@@ -244,36 +176,6 @@ def art_proxy():
         resp.headers["Cache-Control"] = "public, max-age=604800"
         return resp
     return redirect(url)
-
-
-@app.route("/album")
-def album_page():
-    """Detail page for one release: title, tracks, and audio previews.
-
-    Keyed by query params (artist, title, optional release-group mbid) since
-    discovered releases aren't always in the library. The shell renders fast;
-    album.js fetches the tracklist from /api/album.
-    """
-    artist = (request.args.get("artist") or "").strip()
-    title = (request.args.get("title") or "").strip()
-    if not artist or not title:
-        abort(404)
-    # Back link returns to wherever the album was opened from (upcoming default).
-    origin = request.args.get("from")
-    artist_id = request.args.get("artist_id")
-    if origin == "discover":
-        back_url, back_label, active = url_for("discover_page"), "Discover", "discover"
-    elif origin == "artist" and (artist_id or "").isdigit():
-        back_url, back_label, active = url_for("artist_page", artist_id=int(artist_id)), artist, "artists"
-    else:
-        back_url, back_label, active = url_for("upcoming_page"), "Upcoming", "upcoming"
-    ctx = _base_context(active=active)
-    ctx["album_artist"] = artist
-    ctx["album_title"] = title
-    ctx["album_mbid"] = (request.args.get("mbid") or "").strip()
-    ctx["back_url"] = back_url
-    ctx["back_label"] = back_label
-    return render_template("album.html", **ctx)
 
 
 @app.route("/api/album")
@@ -301,22 +203,6 @@ def api_album():
     data["artist_id"] = row["id"] if row else None
     data["following"] = bool(row and row["subscription"] in ("subscribed", "notify"))
     return jsonify(data)
-
-
-@app.route("/settings")
-def settings_page():
-    ctx = _base_context(active="settings")
-    ctx["settings"] = db.get_all_settings()
-    ctx["default_webhook_template"] = webhooks.DEFAULT_TEMPLATE
-    return render_template("settings.html", **ctx)
-
-
-def _base_context(active=""):
-    return {
-        "active": active,
-        "default_theme": db.get_setting("default_theme") or "dark",
-        "hide_page_descriptions": (db.get_setting("hide_page_descriptions") or "false") == "true",
-    }
 
 
 # --- JSON API ---------------------------------------------------------------
@@ -436,6 +322,8 @@ def api_artist(artist_id):
     finally:
         conn.close()
     data = _row_to_dict(artist)
+    # Strip Last.fm's trailing "Read more" link from bios stored before that fix.
+    data["bio"] = lastfm.clean_bio(data.get("bio"))
     data["releases"] = [_row_to_dict(r) for r in releases]
     return jsonify(data)
 
@@ -1411,6 +1299,47 @@ def api_health():
     return jsonify({"status": "ok"})
 
 
+# Client-side router needs the page paths each endpoint maps to.
+ENDPOINT_PATHS = {
+    "artists_page": "/artists",
+    "subscriptions_page": "/subscriptions",
+    "upcoming_page": "/upcoming",
+    "discover_page": "/discover",
+    "ignored_page": "/ignored",
+    "settings_page": "/settings",
+}
+
+
+@app.route("/api/nav")
+def api_nav():
+    """Bootstrap config for the SPA: ordered nav items, home page, theme.
+
+    Reuses normalize_nav_order so the navigation honours the same Settings
+    (nav_order / nav_hidden / home) the server templates used to.
+    """
+    order = normalize_nav_order(db.get_setting("nav_order"))
+    hidden_keys = set((db.get_setting("nav_hidden") or "").split(","))
+    home_key = order[0] if order else DEFAULT_HOME
+    items = [
+        {
+            "key": k,
+            "endpoint": PAGE_DEFS[k][0],
+            "label": PAGE_DEFS[k][1],
+            "path": ENDPOINT_PATHS[PAGE_DEFS[k][0]],
+            "hidden": k in hidden_keys and k != "settings" and k != home_key,
+        }
+        for k in order
+    ]
+    return jsonify({
+        "items": items,
+        "home": home_key,
+        "home_path": ENDPOINT_PATHS[PAGE_DEFS[home_key][0]],
+        "default_theme": db.get_setting("default_theme") or "dark",
+        "hide_page_descriptions": (db.get_setting("hide_page_descriptions") or "false") == "true",
+        "default_webhook_template": webhooks.DEFAULT_TEMPLATE,
+    })
+
+
 # --- PWA assets -------------------------------------------------------------
 
 @app.route("/manifest.webmanifest")
@@ -1424,6 +1353,31 @@ def service_worker():
     response = app.send_static_file("sw.js")
     response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+# --- React single-page app --------------------------------------------------
+
+SPA_DIR = os.path.join(app.static_folder, "spa")
+
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_spa(path):
+    """Serve the built React app for every non-API route.
+
+    The client-side router (React Router) handles /artists, /artist/<id>,
+    /album, /settings, etc. API calls (/api/*) and other explicit routes are
+    matched first by Werkzeug, so they never reach this catch-all.
+    """
+    if path.startswith("api/"):
+        abort(404)
+    index = os.path.join(SPA_DIR, "index.html")
+    if not os.path.exists(index):
+        return (
+            "React app not built. Run `npm install && npm run build` in frontend/.",
+            503,
+        )
+    return send_file(index)
 
 
 if __name__ == "__main__":

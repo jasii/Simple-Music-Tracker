@@ -2,12 +2,11 @@
 // API responses are always fetched fresh (network-first); static assets are
 // cache-first.
 
-const CACHE = 'smt-v2';
-// '/' is intentionally omitted: it now redirects to the configurable home page,
-// and a redirect response can't be reliably cached.
+const CACHE = 'smt-v3';
+// The React SPA serves the same shell for every route, and its hashed assets
+// (under /static/spa/assets/) are cache-first below, so we only need to seed a
+// couple of stable files here. Everything else is cached on first request.
 const SHELL = [
-  '/static/style.css',
-  '/static/app.js',
   '/static/icon.svg',
   '/manifest.webmanifest',
 ];
