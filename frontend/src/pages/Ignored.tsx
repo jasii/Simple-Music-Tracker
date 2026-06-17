@@ -1,17 +1,17 @@
 import { Box, Button, Flex, Heading, Input, Link as CLink, Stack, Text, Wrap } from "@chakra-ui/react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink } from "react-router-dom";
 import { api } from "../api";
 import type { Artist } from "../types";
 
 export default function Ignored() {
-  const [all, setAll] = useState<Artist[] | null>(null);
+  const qc = useQueryClient();
+  const { data: all } = useQuery({
+    queryKey: ["ignored"],
+    queryFn: () => api.ignored().then((d) => d.artists),
+  });
   const [search, setSearch] = useState("");
-
-  function load() {
-    api.ignored().then((d) => setAll(d.artists)).catch(() => setAll([]));
-  }
-  useEffect(load, []);
 
   const shown = useMemo(() => {
     if (!all) return [];
@@ -20,12 +20,14 @@ export default function Ignored() {
   }, [all, search]);
 
   function unignore(id: number) {
-    api.setIgnore(id, false).then(() => setAll((prev) => (prev ? prev.filter((a) => a.id !== id) : prev)));
+    api.setIgnore(id, false).then(() =>
+      qc.setQueryData<Artist[]>(["ignored"], (prev) => (prev ? prev.filter((a) => a.id !== id) : prev)),
+    );
   }
   function unignoreAllShown() {
     const ids = shown.map((a) => a.id);
     if (!ids.length) return;
-    api.bulkIgnore(ids, false).then(load);
+    api.bulkIgnore(ids, false).then(() => qc.invalidateQueries({ queryKey: ["ignored"] }));
   }
 
   return (
@@ -41,7 +43,7 @@ export default function Ignored() {
         <Button variant="outline" onClick={unignoreAllShown}>Unignore all shown</Button>
       </Wrap>
 
-      {all === null ? (
+      {!all ? (
         <Text color="fg.muted">Loading...</Text>
       ) : shown.length === 0 ? (
         <Text color="fg.muted">

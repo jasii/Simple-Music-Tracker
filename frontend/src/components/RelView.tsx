@@ -1,7 +1,7 @@
 // Shared agenda (week-by-week) and calendar (month grid) rendering, used by the
 // Upcoming and Discover pages. Ported from app/static/relview.js. Items each
 // carry a `normalized_date` (YYYY-MM-DD); callers supply how to render a row.
-import { Box, Button, Grid, GridItem, HStack, Heading, IconButton, Stack, Text } from "@chakra-ui/react";
+import { Box, Button, Grid, GridItem, HStack, Heading, IconButton, Stack, Text, Wrap } from "@chakra-ui/react";
 import { useState, type ReactNode } from "react";
 import { LuCalendarDays, LuListTree } from "react-icons/lu";
 
@@ -27,6 +27,13 @@ function weekStart(d: Date): Date {
 function fmtRange(start: Date, end: Date): string {
   const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
   return `${start.toLocaleDateString(undefined, opts)} – ${end.toLocaleDateString(undefined, opts)}`;
+}
+function fmtDay(isoStr: string): string {
+  return parseISO(isoStr).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -76,7 +83,25 @@ export function Agenda<T extends DatedItem>({
               {rel && <Text as="span" fontWeight="bold" mr="2">{rel}</Text>}
               <Text as="span" color="fg.muted">{fmtRange(start, end)}</Text>
             </Heading>
-            {buckets.get(ws)!.map((r) => renderItem(r, keyN++))}
+            {(() => {
+              // Group the week's releases by day, with a day subheading.
+              const dayBuckets = new Map<string, T[]>();
+              buckets.get(ws)!.forEach((r) => {
+                const k = r.normalized_date!;
+                if (!dayBuckets.has(k)) dayBuckets.set(k, []);
+                dayBuckets.get(k)!.push(r);
+              });
+              return Array.from(dayBuckets.keys())
+                .sort()
+                .map((dayIso) => (
+                  <Box key={dayIso} mt="3">
+                    <Text fontWeight="semibold" color="fg.muted" fontSize="sm" mb="1">
+                      {fmtDay(dayIso)}
+                    </Text>
+                    {dayBuckets.get(dayIso)!.map((r) => renderItem(r, keyN++))}
+                  </Box>
+                ));
+            })()}
           </Box>
         );
       })}
@@ -147,7 +172,7 @@ export function Calendar<T extends DatedItem>({
         outlineOffset="-2px"
       >
         <Text fontWeight="semibold" mb="0.5">{d.getDate()}</Text>
-        {evs.map((r) => renderEvent(r, keyN++))}
+        <Wrap gap="1">{evs.map((r) => renderEvent(r, keyN++))}</Wrap>
       </GridItem>,
     );
   }

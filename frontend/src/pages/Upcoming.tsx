@@ -1,5 +1,6 @@
-import { Badge, Box, Checkbox, Flex, HStack, Heading, Image, Link as CLink, Spacer, Text, Wrap } from "@chakra-ui/react";
-import { useEffect, useMemo, useState } from "react";
+import { Badge, Box, CheckboxCard, Flex, HStack, Heading, Image, Link as CLink, Spacer, Text, Wrap } from "@chakra-ui/react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link as RouterLink } from "react-router-dom";
 import { api, art } from "../api";
 import type { UpcomingRelease } from "../types";
@@ -12,11 +13,6 @@ const TYPES = [
   { value: "EP", label: "EPs" },
   { value: "Single", label: "Singles" },
 ];
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-}
 
 function albumHref(r: UpcomingRelease): string {
   const qs = new URLSearchParams({ artist: r.artist_name, title: r.title, from: "upcoming" });
@@ -34,46 +30,45 @@ function AgendaRow({ r }: { r: UpcomingRelease }) {
         <Text fontWeight="semibold">
           <CLink as={RouterLink} {...{ to: albumHref(r) }}>{r.title}</CLink>
         </Text>
-        <CLink as={RouterLink} {...{ to: `/artist/${r.artist_id}` }}>{r.artist_name}</CLink>
-        <Text color="fg.muted" fontSize="sm">{r.normalized_date ? fmtDate(r.normalized_date) : "date TBA"}</Text>
-        <ReleaseIcons artist={r.artist_name} album={r.title} mbid={r.mbid} />
+        <Box>
+          <CLink as={RouterLink} {...{ to: `/artist/${r.artist_id}` }}>{r.artist_name}</CLink>
+        </Box>
         {r.primary_type && (
           <Badge variant="outline" mt="1.5">{r.primary_type}</Badge>
         )}
+      </Box>
+      <Box alignSelf="flex-start" flex="none">
+        <ReleaseIcons artist={r.artist_name} album={r.title} mbid={r.mbid} />
       </Box>
     </Flex>
   );
 }
 
 function CalEvent({ r }: { r: UpcomingRelease }) {
-  const label = `${r.artist_name} – ${r.title}`;
   return (
-    <CLink
+    <Badge
       as={RouterLink}
       {...{ to: `/artist/${r.artist_id}` }}
-      display="block"
-      bg="bg.muted"
-      borderLeftWidth="2px"
-      borderLeftColor="green.solid"
-      rounded="sm"
+      size="sm"
+      variant="surface"
+      colorPalette="green"
+      fontSize="2xs"
       px="1"
-      py="0.5"
-      mb="0.5"
-      fontSize="xs"
-      title={label}
-      whiteSpace="nowrap"
-      overflow="hidden"
-      textOverflow="ellipsis"
-      color="fg"
+      py="0"
+      title={`${r.artist_name} – ${r.title}`}
     >
-      {label}
-    </CLink>
+      {r.artist_name}
+    </Badge>
   );
 }
 
 export default function Upcoming() {
   const nav = useNav();
-  const [items, setItems] = useState<UpcomingRelease[] | null>(null);
+  const { data: items } = useQuery({
+    queryKey: ["upcoming"],
+    queryFn: () =>
+      api.getJSON<{ releases: UpcomingRelease[] }>("/api/upcoming/releases").then((d) => d.releases || []),
+  });
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(() => {
     try {
       return new Set(JSON.parse(localStorage.getItem("upcomingHiddenTypes") || "[]"));
@@ -88,13 +83,6 @@ export default function Upcoming() {
       return "agenda";
     }
   });
-
-  useEffect(() => {
-    api
-      .getJSON<{ releases: UpcomingRelease[] }>("/api/upcoming/releases")
-      .then((d) => setItems(d.releases || []))
-      .catch(() => setItems([]));
-  }, []);
 
   function toggleType(value: string, checked: boolean) {
     setHiddenTypes((prev) => {
@@ -122,16 +110,20 @@ export default function Upcoming() {
         <HStack gap="3" wrap="wrap" fontSize="sm">
           <Wrap gap="2">
             {TYPES.map((t) => (
-              <Checkbox.Root
+              <CheckboxCard.Root
                 key={t.value}
                 size="sm"
+                w="auto"
+                variant="surface"
+                colorPalette="green"
                 checked={!hiddenTypes.has(t.value)}
                 onCheckedChange={(e) => toggleType(t.value, !!e.checked)}
               >
-                <Checkbox.HiddenInput />
-                <Checkbox.Control />
-                <Checkbox.Label>{t.label}</Checkbox.Label>
-              </Checkbox.Root>
+                <CheckboxCard.HiddenInput />
+                <CheckboxCard.Control py="1" px="2" minH="0" alignItems="center" cursor="pointer">
+                  <CheckboxCard.Label>{t.label}</CheckboxCard.Label>
+                </CheckboxCard.Control>
+              </CheckboxCard.Root>
             ))}
           </Wrap>
           <ViewToggle view={view} onChange={changeView} />
@@ -141,7 +133,7 @@ export default function Upcoming() {
         <Text color="fg.muted" mt="1" mb="3">New and upcoming albums from artists you follow.</Text>
       )}
 
-      {items === null ? (
+      {!items ? (
         <Text color="fg.muted">Loading...</Text>
       ) : view === "calendar" ? (
         <Calendar items={visible} renderEvent={(r, k) => <CalEvent key={k} r={r} />} />

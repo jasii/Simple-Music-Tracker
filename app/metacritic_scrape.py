@@ -11,6 +11,7 @@ page doesn't re-scrape on every open; a manual refresh bypasses the cache.
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import requests
@@ -35,6 +36,7 @@ _lock = threading.Lock()
 # image and genre are stable, and a nightly re-scrape reuses this cache.
 _MAX_GENRES = 3
 _ENRICH_TTL = 7 * 24 * 3600  # 7 days
+_ENRICH_WORKERS_DEFAULT = 8
 _enrich_cache = {}
 _enrich_lock = threading.Lock()
 
@@ -90,6 +92,15 @@ def _enrich(artist, album):
     with _enrich_lock:
         _enrich_cache[key] = result
     return result
+
+
+def _enrich_workers():
+    """Parallel enrichment threads, from the discover_enrich_workers setting."""
+    try:
+        n = int(db.get_setting("discover_enrich_workers") or _ENRICH_WORKERS_DEFAULT)
+    except (TypeError, ValueError):
+        n = _ENRICH_WORKERS_DEFAULT
+    return max(1, min(n, 16))
 
 
 def _cache_ttl():
@@ -206,13 +217,21 @@ def fetch_coming_soon(force=False):
 
     with _lock:
         items = parse_releases(_fetch_page())
-        for it in items:
-            extra = _enrich(it.get("artist"), it.get("album"))
-            it["image"] = extra["image"]
-            it["genres"] = extra["genres"]
+        # Enrich in parallel: each release does independent Last.fm / MusicBrainz
+        # lookups. Serial it was minutes; the MusicBrainz 1 req/sec pacing still
+        # throttles its calls, but Last.fm lookups and cache hits run concurrently.
+        if items:
+            with ThreadPoolExecutor(max_workers=_enrich_workers()) as pool:
+                list(pool.map(_apply_enrichment, items))
 
     db.set_discover_cache(SOURCE, items)
     return items, False
+
+
+def _apply_enrichment(it):
+    extra = _enrich(it.get("artist"), it.get("album"))
+    it["image"] = extra["image"]
+    it["genres"] = extra["genres"]
 
 
 def cache_age():

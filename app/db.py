@@ -96,6 +96,7 @@ DEFAULT_SETTINGS = {
     "lastfm_api_key": "",
     "lastfm_cookie": "",            # session cookie for scraping login-only Last.fm pages
     "discover_refresh_hours": "24", # how often the Discover scrape is refreshed
+    "discover_enrich_workers": "8", # parallel threads enriching Discover releases (art/genres)
     "discover_lastfm_enabled": "true",      # show the Last.fm source on Discover
     "discover_metacritic_enabled": "true",  # show the Metacritic source on Discover
     "webhook_url": "",

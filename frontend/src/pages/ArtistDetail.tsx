@@ -11,7 +11,8 @@ import {
   Stack,
   Text,
 } from "@chakra-ui/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { api, art } from "../api";
 import type { Artist, ArtistDetail as ArtistDetailT, DiscographyResponse, Release, Subscription } from "../types";
@@ -26,48 +27,49 @@ const CATS: [keyof DiscographyResponse["groups"], string][] = [
 export default function ArtistDetail() {
   const { id: idParam } = useParams();
   const id = Number(idParam);
-  const [artist, setArtist] = useState<ArtistDetailT | null>(null);
-  const [disco, setDisco] = useState<DiscographyResponse | null>(null);
-  const [discoMsg, setDiscoMsg] = useState("Loading from MusicBrainz...");
-  const [discoSource, setDiscoSource] = useState("");
-  const [hiddenCats, setHiddenCats] = useState<Set<string>>(new Set());
 
+  const { data: artist } = useQuery({
+    queryKey: ["artist", id],
+    queryFn: () => api.artist(id),
+  });
+  const { data: settings } = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api.settings(),
+  });
+  const {
+    data: discoData,
+    isError: discoError,
+    refetch: refetchDisco,
+  } = useQuery({
+    queryKey: ["discography", id],
+    queryFn: () => api.discography(id),
+  });
+
+  const [hiddenCats, setHiddenCats] = useState<Set<string>>(new Set());
   const [sub, setSub] = useState<Subscription>("none");
   const [mtypes, setMtypes] = useState<Set<string>>(new Set());
   const [mtypeResult, setMtypeResult] = useState("");
   const [refreshLabel, setRefreshLabel] = useState("Refresh now");
 
-  const loadDiscography = useCallback(() => {
-    setDiscoMsg("Loading from MusicBrainz...");
-    api
-      .discography(id)
-      .then((data) => {
-        if (!data.mbid) {
-          setDisco(null);
-          setDiscoMsg("No MusicBrainz match for this artist yet. Use Tools above to match a MusicBrainz URL.");
-          return;
-        }
-        setDiscoSource(data.error ? "(MusicBrainz error)" : "(from MusicBrainz)");
-        setDisco(data);
-      })
-      .catch(() => {
-        setDisco(null);
-        setDiscoMsg("Failed to load discography.");
-      });
-  }, [id]);
-
+  // Seed editable local state from the fetched artist / settings.
   useEffect(() => {
-    api.artist(id).then((a) => {
-      setArtist(a);
-      setSub(a.subscription);
-      setMtypes(new Set((a.monitor_types || "album,ep").split(",").filter(Boolean)));
-    });
-    api.settings().then((s) => {
-      const auto = (s.discography_autohide || "").split(",").filter(Boolean);
-      setHiddenCats(new Set(auto));
-    });
-    loadDiscography();
-  }, [id, loadDiscography]);
+    if (!artist) return;
+    setSub(artist.subscription);
+    setMtypes(new Set((artist.monitor_types || "album,ep").split(",").filter(Boolean)));
+  }, [artist]);
+  useEffect(() => {
+    if (!settings) return;
+    setHiddenCats(new Set((settings.discography_autohide || "").split(",").filter(Boolean)));
+  }, [settings]);
+
+  // Derive discography display state from the query result.
+  const disco: DiscographyResponse | null = discoData && discoData.mbid ? discoData : null;
+  const discoSource = disco ? (disco.error ? "(MusicBrainz error)" : "(from MusicBrainz)") : "";
+  const discoMsg = discoError
+    ? "Failed to load discography."
+    : !discoData
+      ? "Loading from MusicBrainz..."
+      : "No MusicBrainz match for this artist yet. Use Tools above to match a MusicBrainz URL.";
 
   function changeSub(state: Subscription) {
     setSub(state);
@@ -160,7 +162,7 @@ export default function ArtistDetail() {
         <Box my="4" color="fg.muted" dangerouslySetInnerHTML={{ __html: artist.bio }} />
       )}
 
-      <MergeTools artistId={id} onMerged={() => window.location.reload()} mbid={artist.mbid} onMatched={loadDiscography} />
+      <MergeTools artistId={id} onMerged={() => window.location.reload()} mbid={artist.mbid} onMatched={() => refetchDisco()} />
 
       <Heading size="lg" mt="6" mb="2">
         Discography <Text as="span" color="fg.muted">{discoSource}</Text>

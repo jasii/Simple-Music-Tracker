@@ -113,6 +113,7 @@ export default function Settings() {
       lastfm_api_key: get("lastfm_api_key"),
       lastfm_cookie: get("lastfm_cookie"),
       discover_refresh_hours: get("discover_refresh_hours"),
+      discover_enrich_workers: get("discover_enrich_workers"),
       musicbrainz_contact: get("musicbrainz_contact"),
       check_interval_hours: get("check_interval_hours"),
       musicbrainz_rate_limit_ms: get("musicbrainz_rate_limit_ms"),
@@ -271,6 +272,10 @@ export default function Settings() {
         <Label>Discover refresh interval (hours)</Label>
         <Input type="number" min={1} step={1} value={get("discover_refresh_hours")} onChange={(e) => set("discover_refresh_hours", e.target.value)} />
         <Hint>How often the Discover scrape refreshes in the background (default 24).</Hint>
+
+        <Label>Discover enrichment workers</Label>
+        <Input type="number" min={1} max={16} step={1} value={get("discover_enrich_workers")} onChange={(e) => set("discover_enrich_workers", e.target.value)} />
+        <Hint>Parallel threads fetching art/genres per release (default 8, max 16). Higher = faster Metacritic refresh.</Hint>
 
         <Label>MusicBrainz contact (email or URL)</Label>
         <Input value={get("musicbrainz_contact")} onChange={(e) => set("musicbrainz_contact", e.target.value)} />

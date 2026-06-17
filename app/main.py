@@ -1146,6 +1146,11 @@ def api_settings():
                 value = str(max(int(float(value)), 1))
             except (TypeError, ValueError):
                 value = "24"
+        elif key == "discover_enrich_workers":
+            try:
+                value = str(min(max(int(float(value)), 1), 16))
+            except (TypeError, ValueError):
+                value = "8"
         elif key == "webhook_trigger":
             value = "before_release" if value == "before_release" else "discovery"
         elif key == "webhook_lead_value":

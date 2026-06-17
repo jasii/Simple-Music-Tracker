@@ -38,16 +38,24 @@ export function ReleaseIcons({
   const ytHref =
     "https://music.youtube.com/search?q=" +
     encodeURIComponent((artist || "") + " " + (album || ""));
+  const iconProps = {
+    h: "24px",
+    w: "24px",
+    filter: "grayscale(1)",
+    opacity: 0.45,
+    transition: "filter 0.15s, opacity 0.15s",
+    _hover: { filter: "grayscale(0)", opacity: 1 },
+  } as const;
   return (
     <HStack gap="3" mt="1">
       <Link href={`https://www.last.fm/music/${a}/${al}`} target="_blank" rel="noopener noreferrer">
-        <Image src="/static/last-fm.svg" alt="Last.fm" h="24px" w="24px" />
+        <Image src="/static/last-fm.svg" alt="Last.fm" {...iconProps} />
       </Link>
       <Link href={mbHref} target="_blank" rel="noopener noreferrer">
-        <Image src="/static/musicbrainz.svg" alt="MusicBrainz" h="24px" w="24px" />
+        <Image src="/static/musicbrainz.svg" alt="MusicBrainz" {...iconProps} />
       </Link>
       <Link href={ytHref} target="_blank" rel="noopener noreferrer">
-        <Image src="/static/youtube-music.svg" alt="YouTube Music" h="24px" w="24px" />
+        <Image src="/static/youtube-music.svg" alt="YouTube Music" {...iconProps} />
       </Link>
     </HStack>
   );

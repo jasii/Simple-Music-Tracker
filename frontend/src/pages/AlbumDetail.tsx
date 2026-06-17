@@ -1,9 +1,9 @@
-import { Badge, Box, Button, Flex, HStack, Heading, IconButton, Image, Link as CLink, Stack, Text } from "@chakra-ui/react";
+import { Box, Button, Flex, Heading, Image, Link as CLink, Stack, Text } from "@chakra-ui/react";
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
-import { LuX } from "react-icons/lu";
 import { api, art } from "../api";
-import type { AlbumDetailResponse, AlbumTrack } from "../types";
+import type { AlbumTrack } from "../types";
 import { ReleaseIcons } from "../lib/format";
 
 function fmtDuration(sec?: number | null): string {
@@ -21,26 +21,29 @@ export default function AlbumDetail() {
   const origin = params.get("from");
   const artistIdParam = params.get("artist_id");
 
-  const [data, setData] = useState<AlbumDetailResponse | null>(null);
+  const { data, isError } = useQuery({
+    queryKey: ["album", artist, title, mbid],
+    queryFn: () => api.album(artist, title, mbid || undefined),
+  });
   const [following, setFollowing] = useState(false);
-  const [msg, setMsg] = useState("Loading...");
-
   useEffect(() => {
-    api
-      .album(artist, title, mbid || undefined)
-      .then((d) => {
-        setData(d);
-        setFollowing(!!d.following);
-        if (!d.tracks || !d.tracks.length) setMsg("Tracklist not available yet.");
-      })
-      .catch(() => setMsg("Failed to load tracklist."));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [artist, title, mbid]);
+    if (data) setFollowing(!!data.following);
+  }, [data]);
 
-  function toggleFollow(state: "subscribed" | "none") {
-    api.trackByName(artist, state).then((r: any) => {
-      if (!r.error) setFollowing(state !== "none");
-    });
+  const msg = isError
+    ? "Failed to load tracklist."
+    : !data
+      ? "Loading..."
+      : "Tracklist not available yet.";
+
+  const [busy, setBusy] = useState(false);
+  function toggleFollow() {
+    const state = following ? "none" : "subscribed";
+    setBusy(true);
+    api
+      .trackByName(artist, state)
+      .then((r: any) => { if (!r.error) setFollowing(state !== "none"); })
+      .finally(() => setBusy(false));
   }
 
   // Back link mirrors the old album_page logic.
@@ -61,23 +64,25 @@ export default function AlbumDetail() {
         </Box>
         <Box>
           <Heading size="xl">{title}</Heading>
-          <HStack gap="2" color="fg.muted">
-            {data?.artist_id ? (
-              <CLink as={RouterLink} {...{ to: `/artist/${data.artist_id}` }}>{artist}</CLink>
-            ) : (
-              <Text as="span">{artist}</Text>
-            )}
-            {following ? (
-              <Badge colorPalette="green" variant="outline">
-                following
-                <IconButton aria-label="Unfollow" title="Unfollow" size="2xs" variant="ghost" ml="1" onClick={() => toggleFollow("none")}>
-                  <LuX />
-                </IconButton>
-              </Badge>
-            ) : (
-              <Button size="xs" variant="outline" onClick={() => toggleFollow("subscribed")}>Follow</Button>
-            )}
-          </HStack>
+          {data?.artist_id ? (
+            <CLink as={RouterLink} {...{ to: `/artist/${data.artist_id}` }} color="fg.muted">{artist}</CLink>
+          ) : (
+            <Text as="span" color="fg.muted">{artist}</Text>
+          )}
+          <Box mt="2">
+            <Button
+              size="xs"
+              variant="surface"
+              colorPalette="gray"
+              bg={following ? undefined : "fg"}
+              color={following ? undefined : "bg"}
+              _hover={following ? undefined : { bg: "fg.muted" }}
+              loading={busy}
+              onClick={toggleFollow}
+            >
+              {following ? "Following" : "Follow"}
+            </Button>
+          </Box>
           <ReleaseIcons artist={artist} album={title} mbid={mbid || undefined} />
         </Box>
       </Flex>

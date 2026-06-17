@@ -3,11 +3,15 @@
 html,
 body,
 #root {
-  height: 100%;
+  min-height: 100vh;
 }
 body {
   margin: 0;
 }
+/* Paint the AMOLED black on <html> (covers overscroll) and on <body>, which now
+   grows with content via min-height so a page taller than the window stays black
+   instead of revealing Chakra's gray canvas past the first viewport. */
+html.dark,
 html.dark body {
   background: #000;
 }

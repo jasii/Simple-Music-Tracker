@@ -11,18 +11,17 @@ import {
   Text,
   Wrap,
 } from "@chakra-ui/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink } from "react-router-dom";
 import { api } from "../api";
 import type { Artist, Stats, Subscription } from "../types";
-import { toaster } from "../components/ui/toaster";
 
 export default function Artists() {
-  const [artists, setArtists] = useState<Artist[]>([]);
-  const [stats, setStats] = useState<Stats | null>(null);
+  const qc = useQueryClient();
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState("name");
   const [progress, setProgress] = useState<string | null>(null);
@@ -33,41 +32,31 @@ export default function Artists() {
   const [mbResult, setMbResult] = useState("");
   const [mbBusy, setMbBusy] = useState(false);
 
-  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
+  // Debounce the search box so each keystroke doesn't refetch.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 200);
+    return () => clearTimeout(t);
+  }, [search]);
 
-  const loadStats = useCallback(() => {
-    api.stats().then(setStats).catch(() => {});
-  }, []);
-
-  const load = useCallback(
-    async (opts: { silent?: boolean } = {}) => {
+  const artistsKey = ["artists", { sort, q: debouncedSearch.trim(), filter }] as const;
+  const { data: artists = [], isPending: loading } = useQuery({
+    queryKey: artistsKey,
+    queryFn: () => {
       const params: Record<string, string> = { sort };
-      if (search.trim()) params.q = search.trim();
+      if (debouncedSearch.trim()) params.q = debouncedSearch.trim();
       if (filter) params.subscription = filter;
-      if (!opts.silent) setLoading(true);
-      const scrollY = window.scrollY;
-      try {
-        const data = await api.artists(params);
-        setArtists(data.artists);
-        if (opts.silent) window.scrollTo(0, scrollY);
-      } catch {
-        if (!opts.silent) toaster.create({ title: "Failed to load artists.", type: "error" });
-      } finally {
-        setLoading(false);
-      }
+      return api.artists(params).then((d) => d.artists);
     },
-    [search, filter, sort],
-  );
+    // Keep the previous list visible while a new query loads — no blank flash
+    // when changing search/sort/filter.
+    placeholderData: keepPreviousData,
+  });
+  const { data: stats } = useQuery({ queryKey: ["stats"], queryFn: () => api.stats() });
 
-  // Debounced reload on search/filter/sort changes.
-  useEffect(() => {
-    clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => load(), 200);
-    return () => clearTimeout(searchTimer.current);
-  }, [load]);
+  const reloadArtists = () => qc.invalidateQueries({ queryKey: ["artists"] });
+  const reloadStats = () => qc.invalidateQueries({ queryKey: ["stats"] });
 
   useEffect(() => {
-    loadStats();
     // Resume a running scan/refresh on mount.
     api.scanStatus().then((s) => { if (s.running) pollScan(); }).catch(() => {});
     api.refreshStatus().then((s) => { if (s.running) pollRefresh(); }).catch(() => {});
@@ -76,8 +65,10 @@ export default function Artists() {
 
   async function setSubscription(id: number, state: Subscription) {
     await api.setSubscription(id, state);
-    setArtists((prev) => prev.map((a) => (a.id === id ? { ...a, subscription: state } : a)));
-    loadStats();
+    qc.setQueryData<Artist[]>(artistsKey, (prev) =>
+      prev?.map((a) => (a.id === id ? { ...a, subscription: state } : a)),
+    );
+    reloadStats();
   }
 
   function toggleSub(a: Artist, checked: boolean) {
@@ -94,13 +85,13 @@ export default function Artists() {
 
   function ignoreOne(id: number) {
     api.setIgnore(id, true).then(() => {
-      setArtists((prev) => prev.filter((x) => x.id !== id));
+      qc.setQueryData<Artist[]>(artistsKey, (prev) => prev?.filter((x) => x.id !== id));
       setSelected((prev) => {
         const next = new Set(prev);
         next.delete(id);
         return next;
       });
-      loadStats();
+      reloadStats();
     });
   }
 
@@ -120,13 +111,15 @@ export default function Artists() {
   function bulkSubscription(state: Subscription) {
     api.bulkSubscription(Array.from(selected), state).then(() => {
       setSelected(new Set());
-      load().then(loadStats);
+      reloadArtists();
+      reloadStats();
     });
   }
   function bulkIgnore() {
     api.bulkIgnore(Array.from(selected), true).then(() => {
       setSelected(new Set());
-      load().then(loadStats);
+      reloadArtists();
+      reloadStats();
     });
   }
 
@@ -140,12 +133,13 @@ export default function Artists() {
             `: ${s.files_seen} files seen, ${s.artists_found} artists. ${s.message || ""}`,
         );
         scanTick.current += 1;
-        if (scanTick.current % 3 === 0) { load({ silent: true }); loadStats(); }
+        if (scanTick.current % 3 === 0) { reloadArtists(); reloadStats(); }
         setTimeout(pollScan, 1000);
       } else {
         setProgress("Scan finished: " + (s.message || ""));
         scanTick.current = 0;
-        load().then(loadStats);
+        reloadArtists();
+        reloadStats();
         setTimeout(() => setProgress(null), 4000);
       }
     });
@@ -160,7 +154,7 @@ export default function Artists() {
         setTimeout(pollRefresh, 2000);
       } else {
         setProgress("Refresh finished.");
-        loadStats();
+        reloadStats();
         setTimeout(() => setProgress(null), 4000);
       }
     });
@@ -192,7 +186,8 @@ export default function Artists() {
         } else {
           setMbResult(`${r.created ? "Added " : "Now following "}${r.name}. Fetching releases...`);
           setMbLink("");
-          load().then(loadStats);
+          reloadArtists();
+          reloadStats();
         }
       })
       .catch(() => setMbResult("Failed to add artist."))

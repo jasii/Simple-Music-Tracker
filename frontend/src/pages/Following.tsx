@@ -1,21 +1,25 @@
-import { Badge, Box, Button, Flex, Heading, Image, Link as CLink, Spacer, Stack, Text } from "@chakra-ui/react";
-import { useEffect, useState } from "react";
+import { Badge, Box, Button, Flex, Heading, IconButton, Image, Link as CLink, Spacer, Stack, Text } from "@chakra-ui/react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink } from "react-router-dom";
+import { LuBell, LuBellRing } from "react-icons/lu";
 import { api, art } from "../api";
-import type { Artist } from "../types";
 import { useNav } from "../nav";
 
 export default function Following() {
-  const [artists, setArtists] = useState<Artist[] | null>(null);
   const nav = useNav();
-
-  function load() {
-    api.subscriptions().then((d) => setArtists(d.artists)).catch(() => setArtists([]));
-  }
-  useEffect(load, []);
+  const qc = useQueryClient();
+  const { data: artists } = useQuery({
+    queryKey: ["subscriptions"],
+    queryFn: () => api.subscriptions().then((d) => d.artists),
+  });
 
   function unfollow(id: number) {
-    api.setSubscription(id, "none").then(load);
+    api.setSubscription(id, "none").then(() => qc.invalidateQueries({ queryKey: ["subscriptions"] }));
+  }
+  function setNotify(id: number, on: boolean) {
+    api.setSubscription(id, on ? "notify" : "subscribed").then(() =>
+      qc.invalidateQueries({ queryKey: ["subscriptions"] }),
+    );
   }
 
   return (
@@ -27,7 +31,7 @@ export default function Following() {
         </Text>
       )}
 
-      {artists === null ? (
+      {!artists ? (
         <Text color="fg.muted">Loading...</Text>
       ) : artists.length === 0 ? (
         <Text color="fg.muted">Not following anyone yet. Follow artists from the Artists page.</Text>
@@ -43,6 +47,16 @@ export default function Following() {
                 <Text color="fg.muted">{a.track_count || 0} tracks</Text>
               </Box>
               <Badge variant="outline" colorPalette="green">{a.subscription === "notify" ? "notify" : "following"}</Badge>
+              <IconButton
+                aria-label={a.subscription === "notify" ? "Disable new-release notifications" : "Notify on new release"}
+                title={a.subscription === "notify" ? "Disable new-release notifications" : "Notify on new release"}
+                size="sm"
+                variant={a.subscription === "notify" ? "solid" : "outline"}
+                colorPalette="green"
+                onClick={() => setNotify(a.id, a.subscription !== "notify")}
+              >
+                {a.subscription === "notify" ? <LuBellRing /> : <LuBell />}
+              </IconButton>
               <Button size="sm" variant="outline" onClick={() => unfollow(a.id)}>Unfollow</Button>
             </Flex>
           ))}

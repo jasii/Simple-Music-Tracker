@@ -13,3 +13,5 @@ data/
 .agents/
 skills-lock.json
 .claude/
+# Local dev script (not for repo)
+dev.sh
