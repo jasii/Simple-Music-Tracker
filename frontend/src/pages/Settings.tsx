@@ -1,6 +1,7 @@
 import {
   Box,
   Button,
+  Checkbox,
   HStack,
   Heading,
   Input,
@@ -56,6 +57,7 @@ export default function Settings() {
   const [keyResult, setKeyResult] = useState("");
   const [cookieResult, setCookieResult] = useState("");
   const [webhookResult, setWebhookResult] = useState("");
+  const [scanResult, setScanResult] = useState("");
   const [cacheStats, setCacheStats] = useState("Checking cache size...");
   const [staleBytes, setStaleBytes] = useState(0);
   const [purgeResult, setPurgeResult] = useState("");
@@ -165,6 +167,28 @@ export default function Settings() {
     api.saveSettings({ [k]: v });
   }
 
+  function scanLibrary(quick: boolean) {
+    setScanResult(quick ? "Quick scan starting..." : "Full scan starting...");
+    // Persist the directory first so the scan uses the value just entered.
+    api
+      .saveSettings({ music_directory: get("music_directory") })
+      .then(() => api.scan(quick))
+      .then((r: any) => {
+        if (r.error) { setScanResult(r.error); return; }
+        const poll = () =>
+          api.scanStatus().then((s: any) => {
+            if (s.running) {
+              setScanResult(`Scanning: ${s.files_seen} files, ${s.artists_found} artists...`);
+              setTimeout(poll, 1000);
+            } else {
+              setScanResult(s.message || "Scan complete.");
+            }
+          }).catch(() => setScanResult("Status check failed."));
+        setTimeout(poll, 600);
+      })
+      .catch(() => setScanResult("Scan failed to start."));
+  }
+
   function purge() {
     if (!window.confirm("Delete cached data for artists you no longer follow? Your settings and followed artists are untouched.")) return;
     setPurgeResult("Purging...");
@@ -244,6 +268,11 @@ export default function Settings() {
         <Label>Music directory (inside the container)</Label>
         <Input value={get("music_directory")} onChange={(e) => set("music_directory", e.target.value)} />
         <Hint>Mount your library here, e.g. <code>-v /path/to/music:/music</code>.</Hint>
+        <HStack gap="2" mb="3" wrap="wrap">
+          <Button size="sm" onClick={() => scanLibrary(false)}>Scan library</Button>
+          <Button size="sm" variant="outline" onClick={() => scanLibrary(true)}>Quick scan</Button>
+          <Text color="fg.muted" fontSize="sm">{scanResult}</Text>
+        </HStack>
         <Check checked={onUnlessFalse("prefer_album_artist")} onChange={(c) => set("prefer_album_artist", c ? "true" : "false")}>
           Use the album-artist tag (fall back to track artist)
         </Check>
@@ -398,9 +427,11 @@ export default function Settings() {
                 <Text fontWeight="semibold" flex="1">{row.label}</Text>
                 {isHome && <Text fontSize="xs" color="green.solid" textTransform="uppercase">home</Text>}
                 {row.key !== "settings" && (
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
-                    <input type="checkbox" checked={isHome ? true : row.show} disabled={locked} onChange={(e) => toggleShow(row.key, e.target.checked)} /> Show
-                  </label>
+                  <Checkbox.Root size="sm" checked={isHome ? true : row.show} disabled={locked} onCheckedChange={(e) => toggleShow(row.key, !!e.checked)}>
+                    <Checkbox.HiddenInput />
+                    <Checkbox.Control />
+                    <Checkbox.Label>Show</Checkbox.Label>
+                  </Checkbox.Root>
                 )}
               </HStack>
             );
@@ -482,8 +513,10 @@ function Check({
   children: React.ReactNode;
 }) {
   return (
-    <label style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", fontWeight: 600 }}>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /> {children}
-    </label>
+    <Checkbox.Root checked={checked} onCheckedChange={(e) => onChange(!!e.checked)} fontWeight="semibold">
+      <Checkbox.HiddenInput />
+      <Checkbox.Control />
+      <Checkbox.Label>{children}</Checkbox.Label>
+    </Checkbox.Root>
   );
 }

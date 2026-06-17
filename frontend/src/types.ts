@@ -68,6 +68,7 @@ export interface DiscographyItem {
   primary_type: string;
   mbid?: string | null;
   image_url?: string | null;
+  owned?: boolean;
   [k: string]: unknown;
 }
 

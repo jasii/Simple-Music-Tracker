@@ -1,21 +1,40 @@
 import {
+  ActionBar,
   Box,
   Button,
-  Flex,
+  ButtonGroup,
+  CloseButton,
   HStack,
   Heading,
+  IconButton,
   Input,
   NativeSelect,
+  Pagination,
+  Portal,
+  Select,
   Spacer,
   Table,
   Text,
   Wrap,
+  createListCollection,
 } from "@chakra-ui/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { LuChevronLeft, LuChevronRight } from "react-icons/lu";
 import { Link as RouterLink } from "react-router-dom";
 import { api } from "../api";
+import { BoxCheck } from "../components/BoxCheck";
 import type { Artist, Stats, Subscription } from "../types";
+
+const PAGE_SIZES = createListCollection({
+  items: [
+    { label: "25 / page", value: "25" },
+    { label: "50 / page", value: "50" },
+    { label: "100 / page", value: "100" },
+    { label: "200 / page", value: "200" },
+    { label: "All", value: "all" },
+  ],
+});
 
 export default function Artists() {
   const qc = useQueryClient();
@@ -25,6 +44,11 @@ export default function Artists() {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState("name");
   const [progress, setProgress] = useState<string | null>(null);
+  const [pageSize, setPageSize] = useState("50");
+  const [page, setPage] = useState(1);
+
+  // Jump back to page 1 whenever the result set changes.
+  useEffect(() => { setPage(1); }, [debouncedSearch, filter, sort]);
 
   // Add-by-link state.
   const [mbLink, setMbLink] = useState("");
@@ -196,7 +220,16 @@ export default function Artists() {
 
   const stat = (k: keyof Stats) => (stats ? stats[k] : "-");
   const selCount = selected.size;
-  const sortedNote = useMemo(() => (artists.length ? `Showing ${artists.length} artists` : ""), [artists]);
+
+  // Client-side pagination over the loaded artists.
+  const perPage = pageSize === "all" ? artists.length || 1 : Number(pageSize);
+  const totalPages = Math.max(1, Math.ceil(artists.length / perPage));
+  const curPage = Math.min(page, totalPages);
+  const pagedArtists =
+    pageSize === "all" ? artists : artists.slice((curPage - 1) * perPage, curPage * perPage);
+  const sortedNote = artists.length
+    ? `Showing ${pagedArtists.length} of ${artists.length} artists`
+    : "";
 
   return (
     <Box>
@@ -264,36 +297,29 @@ export default function Artists() {
         </Box>
       )}
 
-      {selCount > 0 && (
-        <Flex
-          borderWidth="1px"
-          borderColor="green.solid"
-          rounded="md"
-          p="2"
-          mb="3"
-          gap="2"
-          align="center"
-          wrap="wrap"
-        >
-          <Text>{selCount} selected</Text>
-          <Button size="sm" variant="outline" onClick={() => bulkSubscription("subscribed")}>Follow</Button>
-          <Button size="sm" variant="outline" onClick={() => bulkSubscription("notify")}>Follow + Notify</Button>
-          <Button size="sm" variant="outline" onClick={() => bulkSubscription("none")}>Unfollow</Button>
-          <Button size="sm" variant="outline" onClick={bulkIgnore}>Ignore</Button>
-          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>
-        </Flex>
-      )}
+      <ActionBar.Root open={selCount > 0} onOpenChange={(e) => { if (!e.open) setSelected(new Set()); }}>
+        <Portal>
+          <ActionBar.Positioner>
+            <ActionBar.Content>
+              <ActionBar.SelectionTrigger>{selCount} selected</ActionBar.SelectionTrigger>
+              <ActionBar.Separator />
+              <Button size="sm" variant="outline" onClick={() => bulkSubscription("subscribed")}>Follow</Button>
+              <Button size="sm" variant="outline" onClick={() => bulkSubscription("notify")}>Follow + Notify</Button>
+              <Button size="sm" variant="outline" onClick={() => bulkSubscription("none")}>Unfollow</Button>
+              <Button size="sm" variant="outline" onClick={bulkIgnore}>Ignore</Button>
+              <ActionBar.CloseTrigger asChild>
+                <CloseButton size="sm" aria-label="Clear selection" />
+              </ActionBar.CloseTrigger>
+            </ActionBar.Content>
+          </ActionBar.Positioner>
+        </Portal>
+      </ActionBar.Root>
 
       <Table.Root size="sm" interactive>
         <Table.Header>
           <Table.Row>
             <Table.ColumnHeader width="3rem" textAlign="center">
-              <input
-                type="checkbox"
-                aria-label="Select all"
-                checked={allChecked}
-                onChange={(e) => toggleSelectAll(e.target.checked)}
-              />
+              <BoxCheck checked={allChecked} onChange={toggleSelectAll} label="Select all" />
             </Table.ColumnHeader>
             <Table.ColumnHeader>Artist</Table.ColumnHeader>
             <Table.ColumnHeader textAlign="end" width="5rem">Tracks</Table.ColumnHeader>
@@ -308,28 +334,23 @@ export default function Artists() {
           ) : artists.length === 0 ? (
             <Table.Row><Table.Cell colSpan={6} color="fg.muted">No artists. Run a library scan from the toolbar.</Table.Cell></Table.Row>
           ) : (
-            artists.map((a) => {
+            pagedArtists.map((a) => {
               const subChecked = a.subscription === "subscribed" || a.subscription === "notify";
               const notifyChecked = a.subscription === "notify";
               return (
                 <Table.Row key={a.id}>
                   <Table.Cell textAlign="center">
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${a.name}`}
-                      checked={selected.has(a.id)}
-                      onChange={(e) => toggleSelect(a.id, e.target.checked)}
-                    />
+                    <BoxCheck checked={selected.has(a.id)} onChange={(v) => toggleSelect(a.id, v)} label={`Select ${a.name}`} />
                   </Table.Cell>
                   <Table.Cell>
                     <RouterLink to={`/artist/${a.id}`}>{a.name}</RouterLink>
                   </Table.Cell>
                   <Table.Cell textAlign="end" color="fg.muted">{a.track_count || 0}</Table.Cell>
                   <Table.Cell textAlign="center">
-                    <input type="checkbox" aria-label="Follow" checked={subChecked} onChange={(e) => toggleSub(a, e.target.checked)} />
+                    <BoxCheck checked={subChecked} onChange={(v) => toggleSub(a, v)} label={`Follow ${a.name}`} />
                   </Table.Cell>
                   <Table.Cell textAlign="center">
-                    <input type="checkbox" aria-label="Notify" checked={notifyChecked} onChange={(e) => toggleNotify(a, e.target.checked)} />
+                    <BoxCheck checked={notifyChecked} onChange={(v) => toggleNotify(a, v)} label={`Notify for ${a.name}`} />
                   </Table.Cell>
                   <Table.Cell textAlign="center">
                     <Button size="xs" variant="ghost" color="fg.muted" onClick={() => ignoreOne(a.id)} title="Hide this artist">
@@ -343,9 +364,57 @@ export default function Artists() {
         </Table.Body>
       </Table.Root>
 
-      <HStack mt="2">
+      <HStack mt="3" gap="3" wrap="wrap">
         <Text color="fg.muted">{sortedNote}</Text>
+        <Select.Root
+          collection={PAGE_SIZES}
+          value={[pageSize]}
+          onValueChange={(e) => { setPageSize(e.value[0]); setPage(1); }}
+          size="sm"
+          width="9rem"
+        >
+          <Select.HiddenSelect />
+          <Select.Control>
+            <Select.Trigger>
+              <Select.ValueText />
+            </Select.Trigger>
+            <Select.IndicatorGroup>
+              <Select.Indicator />
+            </Select.IndicatorGroup>
+          </Select.Control>
+          <Portal>
+            <Select.Positioner>
+              <Select.Content>
+                {PAGE_SIZES.items.map((item) => (
+                  <Select.Item item={item} key={item.value}>
+                    {item.label}
+                    <Select.ItemIndicator />
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select.Positioner>
+          </Portal>
+        </Select.Root>
         <Spacer />
+        {pageSize !== "all" && totalPages > 1 && (
+          <Pagination.Root count={artists.length} pageSize={perPage} page={curPage} onPageChange={(e) => setPage(e.page)}>
+            <ButtonGroup variant="ghost" size="sm">
+              <Pagination.PrevTrigger asChild>
+                <IconButton aria-label="Previous page"><LuChevronLeft /></IconButton>
+              </Pagination.PrevTrigger>
+              <Pagination.Items
+                render={(p) => (
+                  <IconButton aria-label={`Page ${p.value}`} variant={{ base: "ghost", _selected: "outline" }}>
+                    {p.value}
+                  </IconButton>
+                )}
+              />
+              <Pagination.NextTrigger asChild>
+                <IconButton aria-label="Next page"><LuChevronRight /></IconButton>
+              </Pagination.NextTrigger>
+            </ButtonGroup>
+          </Pagination.Root>
+        )}
       </HStack>
     </Box>
   );

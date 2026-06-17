@@ -1,21 +1,34 @@
 import {
+  Accordion,
+  ActionBar,
+  Badge,
   Box,
   Button,
+  ButtonGroup,
+  Checkbox,
+  CloseButton,
   Flex,
   Grid,
   HStack,
   Heading,
+  IconButton,
   Image,
   Input,
   Link as CLink,
+  Pagination,
+  Portal,
+  RadioGroup,
   Stack,
+  Table,
   Text,
 } from "@chakra-ui/react";
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { LuChevronLeft, LuChevronRight } from "react-icons/lu";
 import { Link as RouterLink, useParams } from "react-router-dom";
+import { BoxCheck } from "../components/BoxCheck";
 import { api, art } from "../api";
-import type { Artist, ArtistDetail as ArtistDetailT, DiscographyResponse, Release, Subscription } from "../types";
+import type { Artist, ArtistDetail as ArtistDetailT, DiscographyItem, DiscographyResponse, Subscription } from "../types";
 import { formatDate } from "../lib/format";
 
 const CATS: [keyof DiscographyResponse["groups"], string][] = [
@@ -23,10 +36,12 @@ const CATS: [keyof DiscographyResponse["groups"], string][] = [
   ["ep", "EPs"],
   ["single", "Singles"],
 ];
+const PAGE_SIZE = 25;
 
 export default function ArtistDetail() {
   const { id: idParam } = useParams();
   const id = Number(idParam);
+  const qc = useQueryClient();
 
   const { data: artist } = useQuery({
     queryKey: ["artist", id],
@@ -50,12 +65,19 @@ export default function ArtistDetail() {
   const [mtypes, setMtypes] = useState<Set<string>>(new Set());
   const [mtypeResult, setMtypeResult] = useState("");
   const [refreshLabel, setRefreshLabel] = useState("Refresh now");
+  const [scanBusy, setScanBusy] = useState(false);
+
+  // Discography table: search / owned filter / row selection / per-type page.
+  const [discoSearch, setDiscoSearch] = useState("");
+  const [ownedFilter, setOwnedFilter] = useState<"all" | "owned" | "unowned">("all");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pages, setPages] = useState<Record<string, number>>({});
 
   // Seed editable local state from the fetched artist / settings.
   useEffect(() => {
     if (!artist) return;
     setSub(artist.subscription);
-    setMtypes(new Set((artist.monitor_types || "album,ep").split(",").filter(Boolean)));
+    setMtypes(new Set((artist.monitor_types ?? "album,ep").split(",").filter(Boolean)));
   }, [artist]);
   useEffect(() => {
     if (!settings) return;
@@ -71,9 +93,158 @@ export default function ArtistDetail() {
       ? "Loading from MusicBrainz..."
       : "No MusicBrainz match for this artist yet. Use Tools above to match a MusicBrainz URL.";
 
+  // Flatten the grouped discography into typed rows.
+  type Row = { it: DiscographyItem; type: string; label: string };
+  const tagged: Row[] = disco
+    ? CATS.flatMap(([key, label]) => (disco.groups[key] || []).map((it) => ({ it, type: key as string, label })))
+    : [];
+  // The headline count reflects only the release types you're monitoring.
+  const monitored = tagged.filter((t) => mtypes.has(t.type));
+  const totalCount = monitored.length;
+  const ownedCount = monitored.filter((t) => t.it.owned).length;
+
+  const rowKey = (it: DiscographyItem) => it.mbid || it.title;
+  const q = discoSearch.trim().toLowerCase();
+  const matches = tagged
+    .filter((t) => !q || t.it.title.toLowerCase().includes(q))
+    .filter((t) => ownedFilter === "all" || (ownedFilter === "owned" ? !!t.it.owned : !t.it.owned));
+  const rowsFor = (type: string) =>
+    matches.filter((t) => t.type === type).sort((a, b) => (b.it.release_date || "").localeCompare(a.it.release_date || ""));
+  const statFor = (type: string) => {
+    const all = tagged.filter((t) => t.type === type);
+    return { owned: all.filter((t) => t.it.owned).length, total: all.length };
+  };
+  // Accordions start open unless the type is auto-hidden in settings.
+  const openCats = ["album", "ep", "single"].filter((k) => !hiddenCats.has(k));
+
+  function albumHref(it: DiscographyItem) {
+    const qs = new URLSearchParams({ artist: artist?.name || "", title: it.title, from: "artist", artist_id: String(id) });
+    if (it.mbid) qs.set("mbid", it.mbid);
+    return "/album?" + qs.toString();
+  }
+  function toggleSelect(k: string, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(k); else next.delete(k);
+      return next;
+    });
+  }
+  function bulkOwned(owned: boolean) {
+    tagged.filter((t) => selected.has(rowKey(t.it))).forEach((t) => toggleOwned(t.it, owned));
+    setSelected(new Set());
+  }
+
+  function renderTable(rows: Row[], type: string) {
+    if (!rows.length) return <Text color="fg.muted" fontSize="sm" mt="2">No albums match.</Text>;
+    const keys = rows.map((t) => rowKey(t.it));
+    const allSel = keys.every((k) => selected.has(k));
+    const setAll = (checked: boolean) =>
+      setSelected((prev) => {
+        const next = new Set(prev);
+        keys.forEach((k) => (checked ? next.add(k) : next.delete(k)));
+        return next;
+      });
+    const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    const page = Math.min(pages[type] || 1, totalPages);
+    const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    return (
+      <>
+      <Table.Root size="sm" interactive stickyHeader mt="2">
+        <Table.Header>
+          <Table.Row>
+            <Table.ColumnHeader w="2.5rem" textAlign="center">
+              <BoxCheck checked={allSel} onChange={setAll} label="Select all" />
+            </Table.ColumnHeader>
+            <Table.ColumnHeader>Title</Table.ColumnHeader>
+            <Table.ColumnHeader w="9rem">Released</Table.ColumnHeader>
+            <Table.ColumnHeader w="4rem" textAlign="center">Owned</Table.ColumnHeader>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
+          {pageRows.map(({ it }) => {
+            const k = rowKey(it);
+            return (
+              <Table.Row key={k}>
+                <Table.Cell textAlign="center">
+                  <BoxCheck checked={selected.has(k)} onChange={(v) => toggleSelect(k, v)} label={`Select ${it.title}`} />
+                </Table.Cell>
+                <Table.Cell>
+                  <HStack gap="2" minW="0">
+                    <Box className={!it.image_url ? "vinyl-art" : undefined} boxSize="36px" flex="none" rounded="sm" bg="bg.muted" overflow="hidden">
+                      {it.image_url && <Image src={art(it.image_url)} alt="" w="full" h="full" objectFit="cover" loading="lazy" />}
+                    </Box>
+                    <CLink as={RouterLink} {...{ to: albumHref(it) }}>{it.title}</CLink>
+                  </HStack>
+                </Table.Cell>
+                <Table.Cell color="fg.muted">{it.release_date ? formatDate(it.release_date) : "TBA"}</Table.Cell>
+                <Table.Cell textAlign="center">
+                  <BoxCheck
+                    checked={!!it.owned}
+                    onChange={(v) => toggleOwned(it, v)}
+                    label={it.owned ? `Mark ${it.title} not owned` : `Mark ${it.title} owned`}
+                  />
+                </Table.Cell>
+              </Table.Row>
+            );
+          })}
+        </Table.Body>
+      </Table.Root>
+      {rows.length > PAGE_SIZE && (
+        <Pagination.Root
+          count={rows.length}
+          pageSize={PAGE_SIZE}
+          page={page}
+          onPageChange={(e) => setPages((prev) => ({ ...prev, [type]: e.page }))}
+          mt="2"
+        >
+          <ButtonGroup variant="ghost" size="sm">
+            <Pagination.PrevTrigger asChild>
+              <IconButton aria-label="Previous page"><LuChevronLeft /></IconButton>
+            </Pagination.PrevTrigger>
+            <Pagination.Items
+              render={(p) => (
+                <IconButton aria-label={`Page ${p.value}`} variant={{ base: "ghost", _selected: "outline" }}>
+                  {p.value}
+                </IconButton>
+              )}
+            />
+            <Pagination.NextTrigger asChild>
+              <IconButton aria-label="Next page"><LuChevronRight /></IconButton>
+            </Pagination.NextTrigger>
+          </ButtonGroup>
+        </Pagination.Root>
+      )}
+      </>
+    );
+  }
+
   function changeSub(state: Subscription) {
     setSub(state);
     api.setSubscription(id, state);
+  }
+
+  function toggleOwned(item: DiscographyItem, owned: boolean) {
+    // Optimistically flip the flag in the cached discography, then persist.
+    qc.setQueryData<DiscographyResponse>(["discography", id], (prev) => {
+      if (!prev) return prev;
+      const groups = { ...prev.groups };
+      (Object.keys(groups) as (keyof typeof groups)[]).forEach((k) => {
+        groups[k] = groups[k].map((it) => (it === item ? { ...it, owned } : it));
+      });
+      return { ...prev, groups };
+    });
+    api.setAlbumOwned(id, item.title, owned, item.mbid).catch(() =>
+      qc.invalidateQueries({ queryKey: ["discography", id] }),
+    );
+  }
+
+  // Rescan only this artist's folders (fast), then refresh owned flags.
+  function rescanOwned() {
+    setScanBusy(true);
+    api.scanArtist(id)
+      .then(() => qc.invalidateQueries({ queryKey: ["artist", id] }))
+      .then(() => refetchDisco())
+      .finally(() => setScanBusy(false));
   }
 
   function toggleMtype(value: string, checked: boolean) {
@@ -86,7 +257,12 @@ export default function ArtistDetail() {
       .then((r: any) => {
         const kept: string[] = r.monitor_types || Array.from(next);
         setMtypes(new Set(kept));
-        setMtypeResult(`Saved (${kept.join(", ")})`);
+        // Keep the cached artist in sync so navigating back doesn't re-seed the
+        // old monitor types (which would revert the headline count).
+        qc.setQueryData<ArtistDetailT>(["artist", id], (prev) =>
+          prev ? { ...prev, monitor_types: kept.join(",") } : prev,
+        );
+        setMtypeResult(kept.length ? `Saved (${kept.join(", ")})` : "Saved");
         setTimeout(() => setMtypeResult(""), 2500);
       })
       .catch(() => setMtypeResult("Failed."));
@@ -95,14 +271,6 @@ export default function ArtistDetail() {
   function refresh() {
     setRefreshLabel("Refreshing...");
     api.refreshArtist(id).then(() => setTimeout(() => setRefreshLabel("Refresh now"), 3000));
-  }
-
-  function toggleCat(key: string) {
-    setHiddenCats((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
   }
 
   if (!artist) return <Text color="fg.muted">Loading...</Text>;
@@ -137,21 +305,29 @@ export default function ArtistDetail() {
             {artist.last_checked && <> <Text as="span" mx="1">/</Text> checked {artist.last_checked}</>}
           </Text>
           <HStack gap="4" my="2" wrap="wrap">
-            {([["none", "Not following"], ["subscribed", "Follow"], ["notify", "Follow + Notify"]] as [Subscription, string][]).map(
-              ([value, label]) => (
-                <label key={value} style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
-                  <input type="radio" name="sub" checked={sub === value} onChange={() => changeSub(value)} /> {label}
-                </label>
-              ),
-            )}
+            <RadioGroup.Root value={sub} onValueChange={(e) => changeSub(e.value as Subscription)}>
+              <HStack gap="4" wrap="wrap">
+                {([["none", "Not following"], ["subscribed", "Follow"], ["notify", "Follow + Notify"]] as [Subscription, string][]).map(
+                  ([value, label]) => (
+                    <RadioGroup.Item key={value} value={value}>
+                      <RadioGroup.ItemHiddenInput />
+                      <RadioGroup.ItemIndicator />
+                      <RadioGroup.ItemText>{label}</RadioGroup.ItemText>
+                    </RadioGroup.Item>
+                  ),
+                )}
+              </HStack>
+            </RadioGroup.Root>
             <Button size="sm" variant="outline" onClick={refresh}>{refreshLabel}</Button>
           </HStack>
           <HStack gap="4" wrap="wrap">
             <Text color="fg.muted">Monitor:</Text>
             {[["album", "Albums"], ["ep", "EPs"], ["single", "Singles"]].map(([value, label]) => (
-              <label key={value} style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
-                <input type="checkbox" checked={mtypes.has(value)} onChange={(e) => toggleMtype(value, e.target.checked)} /> {label}
-              </label>
+              <Checkbox.Root key={value} size="sm" checked={mtypes.has(value)} onCheckedChange={(e) => toggleMtype(value, !!e.checked)}>
+                <Checkbox.HiddenInput />
+                <Checkbox.Control />
+                <Checkbox.Label>{label}</Checkbox.Label>
+              </Checkbox.Root>
             ))}
             <Text color="fg.muted">{mtypeResult}</Text>
           </HStack>
@@ -164,54 +340,91 @@ export default function ArtistDetail() {
 
       <MergeTools artistId={id} onMerged={() => window.location.reload()} mbid={artist.mbid} onMatched={() => refetchDisco()} />
 
-      <Heading size="lg" mt="6" mb="2">
-        Discography <Text as="span" color="fg.muted">{discoSource}</Text>
-      </Heading>
+      <Flex align="center" gap="3" mt="6" mb="2" wrap="wrap">
+        <Heading size="lg">
+          Discography <Text as="span" color="fg.muted">{discoSource}</Text>
+        </Heading>
+        {disco && totalCount > 0 && (
+          <Badge colorPalette={ownedCount ? "green" : "gray"} variant="surface">
+            {ownedCount}/{totalCount} owned
+          </Badge>
+        )}
+        {disco && (
+          <Button size="xs" variant="outline" ml="auto" loading={scanBusy} onClick={rescanOwned}>
+            Rescan owned
+          </Button>
+        )}
+      </Flex>
       {!disco ? (
         <Text color="fg.muted">{discoMsg}</Text>
       ) : (
-        <Stack gap="4">
-          {CATS.map(([key, label]) => {
-            const items = disco.groups[key] || [];
-            const hidden = hiddenCats.has(key);
-            return (
-              <Box as="section" key={key}>
-                <Flex align="center" gap="2" borderBottomWidth="1px" pb="1">
-                  <Heading as="h3" size="md">{label} <Text as="span" color="fg.muted">({items.length})</Text></Heading>
-                  <Button size="xs" variant="outline" ml="auto" onClick={() => toggleCat(key)}>{hidden ? "Show" : "Hide"}</Button>
-                </Flex>
-                {!hidden &&
-                  (items.length ? (
-                    <Stack gap="1" mt="2">
-                      {items.map((r, i) => (
-                        <DiscoRow key={i} r={r as unknown as Release} artistName={artist.name} artistId={id} />
-                      ))}
-                    </Stack>
-                  ) : (
-                    <Text color="fg.muted" mt="2">None.</Text>
-                  ))}
-              </Box>
-            );
-          })}
-        </Stack>
+        <>
+          <Flex gap="3" align="center" wrap="wrap" mb="3">
+            <Input
+              flex="1 1 14rem"
+              size="sm"
+              type="search"
+              placeholder="Filter albums..."
+              value={discoSearch}
+              onChange={(e) => setDiscoSearch(e.target.value)}
+            />
+            <HStack gap="1">
+              {(["all", "owned", "unowned"] as const).map((f) => (
+                <Button
+                  key={f}
+                  size="xs"
+                  variant={ownedFilter === f ? "surface" : "ghost"}
+                  colorPalette="gray"
+                  onClick={() => setOwnedFilter(f)}
+                >
+                  {f === "all" ? "All" : f === "owned" ? "Owned" : "Not owned"}
+                </Button>
+              ))}
+            </HStack>
+          </Flex>
+
+          <ActionBar.Root open={selected.size > 0} onOpenChange={(e) => { if (!e.open) setSelected(new Set()); }}>
+            <Portal>
+              <ActionBar.Positioner>
+                <ActionBar.Content>
+                  <ActionBar.SelectionTrigger>{selected.size} selected</ActionBar.SelectionTrigger>
+                  <ActionBar.Separator />
+                  <Button size="sm" variant="surface" colorPalette="green" onClick={() => bulkOwned(true)}>Mark owned</Button>
+                  <Button size="sm" variant="surface" colorPalette="gray" onClick={() => bulkOwned(false)}>Mark not owned</Button>
+                  <ActionBar.CloseTrigger asChild>
+                    <CloseButton size="sm" aria-label="Clear selection" />
+                  </ActionBar.CloseTrigger>
+                </ActionBar.Content>
+              </ActionBar.Positioner>
+            </Portal>
+          </ActionBar.Root>
+
+          <Accordion.Root multiple collapsible defaultValue={openCats}>
+            {([["album", "Albums"], ["ep", "EPs"], ["single", "Singles"]] as const).map(([key, label]) => {
+              const st = statFor(key);
+              return (
+                <Accordion.Item key={key} value={key}>
+                  <Accordion.ItemTrigger>
+                    <Heading as="h3" size="sm" flex="1" textAlign="start" fontWeight="semibold">
+                      {label} <Text as="span" color="fg.muted" fontWeight="normal">({st.total})</Text>
+                    </Heading>
+                    {st.total > 0 && (
+                      <Badge colorPalette={st.owned ? "green" : "gray"} variant="surface" mr="2">
+                        {st.owned}/{st.total} owned
+                      </Badge>
+                    )}
+                    <Accordion.ItemIndicator />
+                  </Accordion.ItemTrigger>
+                  <Accordion.ItemContent>
+                    <Accordion.ItemBody>{renderTable(rowsFor(key), key)}</Accordion.ItemBody>
+                  </Accordion.ItemContent>
+                </Accordion.Item>
+              );
+            })}
+          </Accordion.Root>
+        </>
       )}
     </Box>
-  );
-}
-
-function DiscoRow({ r, artistName, artistId }: { r: Release; artistName: string; artistId: number }) {
-  const qs = new URLSearchParams({ artist: artistName, title: r.title, from: "artist", artist_id: String(artistId) });
-  if (r.mbid) qs.set("mbid", r.mbid);
-  return (
-    <Flex gap="3" py="2" align="center">
-      <Box className={!r.image_url ? "vinyl-art" : undefined} boxSize="150px" flex="none" rounded="md" bg="bg.muted" overflow="hidden">
-        {r.image_url && <Image src={art(r.image_url)} alt="" w="full" h="full" objectFit="cover" loading="lazy" />}
-      </Box>
-      <Box flex="1" minW="0">
-        <Text fontWeight="semibold"><CLink as={RouterLink} {...{ to: "/album?" + qs.toString() }}>{r.title}</CLink></Text>
-        <Text color="fg.muted" fontSize="sm">{r.release_date ? formatDate(r.release_date) : "date TBA"}</Text>
-      </Box>
-    </Flex>
   );
 }
 
@@ -309,17 +522,23 @@ function MergeTools({
               <CompareCard a={compare.target} role="Keep (this artist)" />
               <CompareCard a={compare.source} role="Merge in & remove" />
             </Grid>
-            <HStack gap="4" my="3" wrap="wrap">
-              <Text fontWeight="semibold">Keep name:</Text>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
-                <input type="radio" name="merge-name" checked={keepName === "target"} onChange={() => setKeepName("target")} /> {compare.target.name}
-              </label>
-              {compare.source.name.toLowerCase() !== compare.target.name.toLowerCase() && (
-                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
-                  <input type="radio" name="merge-name" checked={keepName === "source"} onChange={() => setKeepName("source")} /> {compare.source.name}
-                </label>
-              )}
-            </HStack>
+            <RadioGroup.Root value={keepName} onValueChange={(e) => setKeepName(e.value as "target" | "source")} my="3">
+              <HStack gap="4" wrap="wrap">
+                <Text fontWeight="semibold">Keep name:</Text>
+                <RadioGroup.Item value="target">
+                  <RadioGroup.ItemHiddenInput />
+                  <RadioGroup.ItemIndicator />
+                  <RadioGroup.ItemText>{compare.target.name}</RadioGroup.ItemText>
+                </RadioGroup.Item>
+                {compare.source.name.toLowerCase() !== compare.target.name.toLowerCase() && (
+                  <RadioGroup.Item value="source">
+                    <RadioGroup.ItemHiddenInput />
+                    <RadioGroup.ItemIndicator />
+                    <RadioGroup.ItemText>{compare.source.name}</RadioGroup.ItemText>
+                  </RadioGroup.Item>
+                )}
+              </HStack>
+            </RadioGroup.Root>
             <HStack gap="2">
               <Button onClick={confirmMerge}>Merge these</Button>
               <Button variant="outline" onClick={() => setCompare(null)}>Cancel</Button>

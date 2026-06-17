@@ -372,15 +372,17 @@ def api_set_subscription(artist_id):
 def api_set_monitor_types(artist_id):
     """Set which release types to watch for an artist.
 
-    Body: {"types": ["album", "ep", "single"]} (any non-empty subset).
+    Body: {"types": ["album", "ep", "single"]} (any subset, including none).
     Releases of types no longer monitored are dropped, then a refresh is queued.
     """
     payload = request.get_json(silent=True) or {}
     types = payload.get("types")
     if types is None:
         types = request.form.getlist("types")
-    monitor_types = db.normalize_monitor_types(types)
-    kept = monitor_types.split(",")
+    # Allow an empty selection here (unlike new-artist defaults) so the user can
+    # turn off monitoring entirely for an artist.
+    kept = db.clean_types(types)
+    monitor_types = ",".join(kept)
 
     with db._write_lock:
         conn = db.get_connection()
@@ -392,12 +394,15 @@ def api_set_monitor_types(artist_id):
             if cur.rowcount:
                 # Drop stored releases whose type is no longer monitored.
                 labels = [t.capitalize() if t != "ep" else "EP" for t in kept]
-                placeholders = ",".join("?" for _ in labels)
-                conn.execute(
-                    f"DELETE FROM releases WHERE artist_id = ? "
-                    f"AND primary_type NOT IN ({placeholders})",
-                    [artist_id, *labels],
-                )
+                if labels:
+                    placeholders = ",".join("?" for _ in labels)
+                    conn.execute(
+                        f"DELETE FROM releases WHERE artist_id = ? "
+                        f"AND primary_type NOT IN ({placeholders})",
+                        [artist_id, *labels],
+                    )
+                else:
+                    conn.execute("DELETE FROM releases WHERE artist_id = ?", (artist_id,))
             conn.commit()
         finally:
             conn.close()
@@ -559,9 +564,12 @@ def api_discography(artist_id):
         return jsonify({"error": str(exc), "mbid": mbid,
                         "groups": {"album": [], "ep": [], "single": []}}), 502
 
+    owned_keys, owned_mbids = db.get_owned(artist_id)
     groups = {"album": [], "ep": [], "single": []}
     label_to_key = {"Album": "album", "EP": "ep", "Single": "single"}
     for item in items:
+        item["owned"] = (item.get("mbid") in owned_mbids) \
+            or (db.owned_album_key(item.get("title")) in owned_keys)
         key = label_to_key.get(item["primary_type"])
         if key:
             groups[key].append(item)
@@ -570,6 +578,32 @@ def api_discography(artist_id):
 
     return jsonify({"mbid": mbid, "groups": groups,
                     "counts": {k: len(v) for k, v in groups.items()}})
+
+
+@app.route("/api/artists/<int:artist_id>/scan", methods=["POST"])
+def api_scan_artist(artist_id):
+    """Fast rescan of one artist: walk only their known/matching folders, then
+    update track count + owned albums. Runs inline (scoped, so quick)."""
+    summary = scanner.scan_artist(artist_id)
+    if summary.get("error"):
+        return jsonify(summary), 404
+    return jsonify(summary)
+
+
+@app.route("/api/artists/<int:artist_id>/albums/owned", methods=["POST"])
+def api_set_album_owned(artist_id):
+    """Manually mark/unmark an album as owned.
+
+    Body: {"title": "...", "owned": true/false, "mbid": "<release-group id>"?}.
+    """
+    payload = request.get_json(silent=True) or {}
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "title required"}), 400
+    owned = bool(payload.get("owned"))
+    rg_mbid = (payload.get("mbid") or "").strip() or None
+    db.set_owned(artist_id, title, owned, rg_mbid)
+    return jsonify({"title": title, "owned": owned})
 
 
 @app.route("/api/artists/track-by-name", methods=["POST"])
@@ -1387,4 +1421,5 @@ def serve_spa(path):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes", "on")
+    app.run(host="0.0.0.0", port=port, debug=debug)

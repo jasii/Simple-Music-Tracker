@@ -37,6 +37,10 @@ _MBID_TAGS = [
     "MusicBrainz Album Artist Id",
     "MusicBrainz Artist Id",
 ]
+_ALBUM_TAGS = ["album", "TALB", "\xa9alb"]
+# Release-group id ties an owned album to a row in the artist's MusicBrainz
+# discography; Picard-tagged libraries usually have it.
+_RG_MBID_TAGS = ["musicbrainz_releasegroupid", "MusicBrainz Release Group Id"]
 
 # Flush newly discovered artists to the database this often (in audio files
 # processed) so they show up in the UI promptly during a long scan.
@@ -82,7 +86,7 @@ def _first_tag_value(tags, keys):
 
 
 def _extract(path, prefer_album=True):
-    """Return (artist_name, mbid) for an audio file, or (None, None).
+    """Return (artist_name, mbid, album, rg_mbid) for an audio file, or all None.
 
     When *prefer_album* the album-artist tag is used and the track artist is
     only a fallback (so e.g. compilations stay under one album artist); set it
@@ -96,9 +100,9 @@ def _extract(path, prefer_album=True):
         try:
             audio = MutagenFile(path)
         except Exception:
-            return None, None
+            return None, None, None, None
     if audio is None:
-        return None, None
+        return None, None, None, None
 
     tags = getattr(audio, "tags", None) or audio
     album_artist = _first_tag_value(tags, _ALBUM_ARTIST_TAGS)
@@ -108,7 +112,9 @@ def _extract(path, prefer_album=True):
     else:
         name = track_artist or album_artist
     mbid = _first_tag_value(tags, _MBID_TAGS)
-    return name, mbid
+    album = _first_tag_value(tags, _ALBUM_TAGS)
+    rg_mbid = _first_tag_value(tags, _RG_MBID_TAGS)
+    return name, mbid, album, rg_mbid
 
 
 def _flush(conn, batch, increment):
@@ -128,25 +134,32 @@ def _flush(conn, batch, increment):
                 "SELECT id FROM artists WHERE sort_name = ?", (sort_name,)
             ).fetchone()
             if existing:
+                artist_id = existing["id"]
                 if increment:
                     conn.execute(
                         "UPDATE artists SET name = ?, "
                         "track_count = track_count + ?, "
                         "mbid = COALESCE(mbid, ?) WHERE id = ?",
-                        (entry["name"], entry["count"], entry["mbid"], existing["id"]),
+                        (entry["name"], entry["count"], entry["mbid"], artist_id),
                     )
                 else:
                     conn.execute(
                         "UPDATE artists SET name = ?, track_count = ?, "
                         "mbid = COALESCE(mbid, ?) WHERE id = ?",
-                        (entry["name"], entry["count"], entry["mbid"], existing["id"]),
+                        (entry["name"], entry["count"], entry["mbid"], artist_id),
                     )
             else:
-                conn.execute(
+                cur = conn.execute(
                     "INSERT INTO artists (name, sort_name, mbid, track_count) "
                     "VALUES (?, ?, ?, ?)",
                     (entry["name"], sort_name, entry["mbid"], entry["count"]),
                 )
+                artist_id = cur.lastrowid
+            # Record the albums seen for this artist as owned (scan source).
+            for alb in entry.get("albums", {}).values():
+                db.mark_owned(conn, artist_id, alb["title"], alb["rg_mbid"], source="scan")
+            # Remember the folders so a per-artist rescan can target them.
+            db.record_artist_folders(conn, artist_id, entry.get("folders", ()))
         conn.commit()
     if increment:
         # Deltas are now persisted; start accumulating fresh ones.
@@ -212,17 +225,24 @@ def scan_directory(directory, quick=False):
                     except OSError:
                         continue
 
-                name, mbid = _extract(path, prefer_album)
+                name, mbid, album, rg_mbid = _extract(path, prefer_album)
                 processed += 1
                 if not name:
                     continue
 
                 key = name.lower()
                 seen_artists.add(key)
-                entry = running.setdefault(key, {"name": name, "count": 0, "mbid": None})
+                entry = running.setdefault(key, {"name": name, "count": 0, "mbid": None, "albums": {}, "folders": set()})
                 entry["count"] += 1
+                entry["folders"].add(root)
                 if mbid and not entry["mbid"]:
                     entry["mbid"] = mbid
+                if album:
+                    ak = album.strip().lower()
+                    if ak:
+                        alb = entry["albums"].setdefault(ak, {"title": album.strip(), "rg_mbid": None})
+                        if rg_mbid and not alb["rg_mbid"]:
+                            alb["rg_mbid"] = rg_mbid
 
                 since_flush += 1
                 if since_flush >= FLUSH_EVERY_FILES:
@@ -284,3 +304,95 @@ def scan_in_background(directory, quick=False):
     )
     thread.start()
     return thread
+
+
+# --- per-artist rescan ------------------------------------------------------
+
+def _norm(s):
+    """Lowercase, alphanumerics only -- robust folder-name matching."""
+    return "".join(ch for ch in (s or "").lower() if ch.isalnum())
+
+
+def _top_dirs(paths):
+    """Drop any path nested under another in the set (avoid double-walking)."""
+    out = []
+    for p in sorted(os.path.abspath(p) for p in paths):
+        if not any(p == q or p.startswith(q + os.sep) for q in out):
+            out.append(p)
+    return out
+
+
+def _matching_dirs(music_dir, artist_norm, max_depth=2):
+    """Folders within *max_depth* of the music root whose name contains the
+    artist (handles 'Artist - Year - Album' and 'Artist/Album' layouts)."""
+    base = os.path.abspath(music_dir)
+    out = []
+    for root, dirs, _files in os.walk(base):
+        depth = root[len(base):].count(os.sep)
+        if depth >= max_depth:
+            dirs[:] = []  # don't descend further; names only, no tag reads
+        for d in dirs:
+            if artist_norm and artist_norm in _norm(d):
+                out.append(os.path.join(root, d))
+    return out
+
+
+def scan_artist(artist_id):
+    """Rescan just one artist: walk their remembered folders plus any folders in
+    the music root whose name matches the artist. Updates track_count, owned
+    albums and the folder list. Returns a summary dict.
+    """
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id, name, sort_name FROM artists WHERE id = ?", (artist_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return {"error": "artist not found"}
+
+    sort_name = row["sort_name"]
+    prefer_album = (db.get_setting("prefer_album_artist") or "true") != "false"
+    artist_norm = _norm(row["name"])
+
+    dirs = {f for f in db.get_artist_folders(artist_id) if os.path.isdir(f)}
+    music_dir = db.get_setting("music_directory") or ""
+    if music_dir and os.path.isdir(music_dir):
+        dirs.update(_matching_dirs(music_dir, artist_norm))
+
+    count = 0
+    albums = {}
+    folders = set()
+    for d in _top_dirs(dirs):
+        for root, _sub, files in os.walk(d):
+            for fname in files:
+                if os.path.splitext(fname)[1].lower() not in AUDIO_EXTENSIONS:
+                    continue
+                name, _mbid, album, rg_mbid = _extract(os.path.join(root, fname), prefer_album)
+                # Only count files that actually belong to this artist.
+                if not name or name.lower() != sort_name:
+                    continue
+                count += 1
+                folders.add(root)
+                if album:
+                    ak = album.strip().lower()
+                    if ak:
+                        alb = albums.setdefault(ak, {"title": album.strip(), "rg_mbid": None})
+                        if rg_mbid and not alb["rg_mbid"]:
+                            alb["rg_mbid"] = rg_mbid
+
+    with db._write_lock:
+        conn = db.get_connection()
+        try:
+            conn.execute(
+                "UPDATE artists SET track_count = ? WHERE id = ?", (count, artist_id)
+            )
+            for alb in albums.values():
+                db.mark_owned(conn, artist_id, alb["title"], alb["rg_mbid"], source="scan")
+            db.record_artist_folders(conn, artist_id, folders)
+            conn.commit()
+        finally:
+            conn.close()
+
+    return {"artist_id": artist_id, "files": count, "albums": len(albums), "folders": len(folders)}

@@ -59,6 +59,10 @@ export const api = {
   merge: (id: number, sourceIds: number[], name?: string) =>
     postJSON(`/api/artists/${id}/merge`, { source_ids: sourceIds, name }),
   refreshArtist: (id: number) => postJSON(`/api/artists/${id}/refresh`),
+  setAlbumOwned: (id: number, title: string, owned: boolean, mbid?: string | null) =>
+    postJSON<{ title: string; owned: boolean }>(`/api/artists/${id}/albums/owned`, { title, owned, mbid }),
+  scanArtist: (id: number) =>
+    postJSON<{ artist_id: number; files: number; albums: number; folders: number }>(`/api/artists/${id}/scan`),
   discography: (id: number, refresh = false) =>
     getJSON<DiscographyResponse>(
       `/api/artists/${id}/discography` + (refresh ? "?refresh=1" : ""),

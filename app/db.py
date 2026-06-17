@@ -88,6 +88,27 @@ CREATE TABLE IF NOT EXISTS scan_log (
     artists_found INTEGER DEFAULT 0,
     message     TEXT
 );
+
+-- Albums the user owns, marked by the library scan or manually on the artist
+-- page. Matched against an artist's MusicBrainz discography by release-group
+-- mbid first, then by normalized title. One row per (artist, album_key).
+CREATE TABLE IF NOT EXISTS owned_albums (
+    artist_id   INTEGER NOT NULL,
+    album_key   TEXT NOT NULL,    -- lower(title), the fallback match key
+    rg_mbid     TEXT,             -- MusicBrainz release-group id, when tagged
+    title       TEXT,
+    source      TEXT NOT NULL DEFAULT 'scan',  -- 'scan' | 'manual'
+    PRIMARY KEY (artist_id, album_key)
+);
+CREATE INDEX IF NOT EXISTS idx_owned_rg_mbid ON owned_albums (rg_mbid);
+
+-- Folders where an artist's tracks were found during a scan, so a per-artist
+-- rescan can walk just those directories instead of the whole library.
+CREATE TABLE IF NOT EXISTS artist_folders (
+    artist_id   INTEGER NOT NULL,
+    folder      TEXT NOT NULL,
+    PRIMARY KEY (artist_id, folder)
+);
 """
 
 
@@ -268,6 +289,88 @@ def set_discover_cache(source, items):
             conn.commit()
         finally:
             conn.close()
+
+
+# --- owned albums -----------------------------------------------------------
+
+def owned_album_key(title):
+    """Normalized match key for an album title."""
+    return (title or "").strip().lower()
+
+
+def mark_owned(conn, artist_id, title, rg_mbid=None, source="scan"):
+    """Upsert an owned album on an open connection (caller holds the write lock).
+
+    A manual mark wins over a scan mark for the same album; a scan never
+    downgrades a manual one.
+    """
+    key = owned_album_key(title)
+    if not key:
+        return
+    conn.execute(
+        "INSERT INTO owned_albums (artist_id, album_key, rg_mbid, title, source) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(artist_id, album_key) DO UPDATE SET "
+        "rg_mbid = COALESCE(excluded.rg_mbid, owned_albums.rg_mbid), "
+        "title = excluded.title, "
+        "source = CASE WHEN excluded.source = 'manual' THEN 'manual' ELSE owned_albums.source END",
+        (artist_id, key, rg_mbid, title, source),
+    )
+
+
+def set_owned(artist_id, title, owned, rg_mbid=None):
+    """Manually mark/unmark an album as owned. Returns the new owned state."""
+    with _write_lock:
+        conn = get_connection()
+        try:
+            if owned:
+                mark_owned(conn, artist_id, title, rg_mbid, source="manual")
+            else:
+                conn.execute(
+                    "DELETE FROM owned_albums WHERE artist_id = ? AND album_key = ?",
+                    (artist_id, owned_album_key(title)),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    return bool(owned)
+
+
+def get_owned(artist_id):
+    """Return ({album_key, ...}, {rg_mbid, ...}) of owned albums for an artist."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT album_key, rg_mbid FROM owned_albums WHERE artist_id = ?",
+            (artist_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    keys = {r["album_key"] for r in rows}
+    mbids = {r["rg_mbid"] for r in rows if r["rg_mbid"]}
+    return keys, mbids
+
+
+def record_artist_folders(conn, artist_id, folders):
+    """Remember the directories an artist's tracks live in (open connection)."""
+    for folder in folders:
+        if folder:
+            conn.execute(
+                "INSERT OR IGNORE INTO artist_folders (artist_id, folder) VALUES (?, ?)",
+                (artist_id, folder),
+            )
+
+
+def get_artist_folders(artist_id):
+    """Return the list of stored folders for an artist."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT folder FROM artist_folders WHERE artist_id = ?", (artist_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    return [r["folder"] for r in rows]
 
 
 # --- generic JSON cache -----------------------------------------------------
