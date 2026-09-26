@@ -1,0 +1,16 @@
+# Web framework (includes Jinja2 + Werkzeug). SQLite is stdlib.
+Flask==3.0.3
+# HTTP client for Last.fm / MusicBrainz / webhook delivery.
+requests==2.32.3
+# Audio tag reading for the library scanner.
+mutagen==1.47.0
+# HTML parsing for scraping discovery pages (e.g. Last.fm coming-soon releases).
+beautifulsoup4==4.12.3
+# Browser-TLS-fingerprint HTTP client: albumoftheyear.org sits behind Cloudflare,
+# which rejects python-requests handshakes even with a valid cf_clearance cookie.
+curl_cffi==0.13.0
+# Production WSGI server.
+gunicorn==22.0.0
+# Optional: pulls the audio out of a video preview so it plays in the app's
+# own player instead of an embed (see app/videoaudio.py).
+yt-dlp

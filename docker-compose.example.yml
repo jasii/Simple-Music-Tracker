@@ -1,0 +1,43 @@
+# Example: run the pre-built image pulled from the GitHub Container Registry.
+#
+#   1. (Optional) point DATA_DIR at where you want backups kept, e.g.
+#        export DATA_DIR=/srv/music-tracker/data
+#   2. (Optional) to scan a local library, uncomment the music volume below
+#        and set MUSIC_DIR to your library path. Skip this to add artists manually.
+#   3. Run:  docker compose -f docker-compose.example.yml up -d
+#   4. Open: http://localhost:8080
+#
+# Update later with:  docker compose -f docker-compose.example.yml pull && \
+#                     docker compose -f docker-compose.example.yml up -d
+#
+# Backups: everything (DB + all caches) is under the /data volume. Copy that
+# host folder (DATA_DIR, default ./data) to back the whole app up.
+services:
+  music-tracker:
+    image: ghcr.io/jasii/simple-music-tracker:latest
+    container_name: simple-music-tracker
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      # App state + all caches (SQLite). Back up this folder. Override with DATA_DIR.
+      - ${DATA_DIR:-./data}:/data
+
+      # OPTIONAL music library (read-only) for scanning. Not required - track
+      # artists manually instead. Uncomment and set MUSIC_DIR to enable.
+      # - ${MUSIC_DIR:-/path/to/your/music}:/music:ro
+    environment:
+      - SMT_DB_PATH=/data/tracker.db
+    restart: unless-stopped
+
+  # OPTIONAL: albumoftheyear.org sits behind a Cloudflare challenge, so the
+  # Discover source for it needs either a cf_clearance cookie pasted by hand
+  # (it expires within hours) or this, which solves the challenge in a real
+  # browser and hands back a fresh cookie automatically. Uncomment, then in
+  # Settings > Plugins > Challenge solvers turn FlareSolverr on and set its
+  # address to http://flaresolverr:8191.
+  # flaresolverr:
+  #   image: ghcr.io/flaresolverr/flaresolverr:latest
+  #   container_name: flaresolverr
+  #   environment:
+  #     - LOG_LEVEL=info
+  #   restart: unless-stopped

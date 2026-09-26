@@ -1,0 +1,139 @@
+/* Minimal globals layered on top of Tailwind/shadcn. AMOLED-black dark
+   background to match the original app; the vinyl placeholder for release art
+   with no image. */
+html,
+body,
+#root {
+  min-height: 100vh;
+}
+body {
+  margin: 0;
+}
+/* Paint AMOLED black on <html> too (covers overscroll past the body). The body
+   background itself comes from the shadcn base layer (bg-background). */
+html.dark,
+html.dark body {
+  background: #000;
+}
+
+/* Anything that responds to a click says so. Tailwind's own reset sets
+   `cursor: default` on buttons, which leaves half the app -- every shadcn
+   button, every menu item, every artist name that isn't a router link yet --
+   looking inert under the pointer. Written as bare selectors rather than
+   utilities so it applies to markup nobody remembered to decorate, and so a
+   deliberate `cursor-grab` or `cursor-zoom-in` utility still wins. */
+a[href],
+button:not(:disabled),
+summary,
+select:not(:disabled),
+input[type="checkbox"]:not(:disabled),
+input[type="radio"]:not(:disabled),
+label:has(input[type="checkbox"]:not(:disabled)),
+label:has(input[type="radio"]:not(:disabled)),
+[role="button"]:not([aria-disabled="true"]),
+[role="link"],
+[role="tab"]:not([aria-disabled="true"]),
+[role="option"]:not([aria-disabled="true"]),
+[role="menuitem"]:not([aria-disabled="true"]),
+[role="menuitemcheckbox"]:not([aria-disabled="true"]),
+[role="menuitemradio"]:not([aria-disabled="true"]),
+[role="checkbox"]:not([aria-disabled="true"]),
+[role="radio"]:not([aria-disabled="true"]),
+[role="switch"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+/* And anything switched off says that instead. */
+button:disabled,
+select:disabled,
+[aria-disabled="true"],
+[data-disabled] {
+  cursor: not-allowed;
+}
+
+.vinyl-art {
+  /* Muted fill behind the vinyl image; kept here (not a `background` shorthand)
+     so it doesn't clear the background-image. */
+  background-color: var(--muted);
+  background-image: url("/static/vinyl.svg");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 58%;
+}
+
+/* react-h5-audio-player, themed onto the app's tokens -- the library ships a
+   light-only stylesheet, and this player docks over an AMOLED-black page. The
+   controls are also scaled down: it sits in a bar, not on a landing page. */
+.smt-audio-player.rhap_container {
+  flex: 1 1 22rem;
+  min-width: 0;
+  max-width: 34rem;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.smt-audio-player .rhap_time {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+.smt-audio-player .rhap_progress-bar {
+  height: 4px;
+  background-color: var(--border);
+}
+.smt-audio-player .rhap_progress-filled {
+  background-color: var(--primary);
+}
+.smt-audio-player .rhap_download-progress {
+  background-color: var(--muted);
+}
+.smt-audio-player .rhap_progress-indicator,
+.smt-audio-player .rhap_volume-indicator {
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  /* Centre the 12px handle on the 4px bar: (4 - 12) / 2. The library's own
+     -8px is for its bigger default handle, which left ours riding high. */
+  top: -4px;
+  background: var(--primary);
+  box-shadow: none;
+}
+.smt-audio-player .rhap_volume-bar {
+  height: 4px;
+  background-color: var(--border);
+}
+.smt-audio-player .rhap_volume-filled {
+  background-color: var(--primary);
+}
+.smt-audio-player .rhap_main-controls-button,
+.smt-audio-player .rhap_volume-button {
+  color: var(--foreground);
+}
+.smt-audio-player .rhap_main-controls-button {
+  width: 26px;
+  height: 26px;
+  font-size: 26px;
+}
+.smt-audio-player .rhap_play-pause-button {
+  width: 32px;
+  height: 32px;
+  font-size: 32px;
+}
+.smt-audio-player .rhap_button-clear:hover {
+  opacity: 0.8;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
