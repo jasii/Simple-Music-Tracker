@@ -6,9 +6,12 @@ import {
   LuChevronDown,
   LuChevronUp,
   LuCircleHelp,
+  LuExternalLink,
   LuEye,
   LuEyeOff,
   LuCompass,
+  LuPlus,
+  LuTrash2,
   LuDownload,
   LuLibrary,
   LuPlug,
@@ -29,7 +32,7 @@ import {
 } from "../components/ui/accordion";
 import { Card, CardContent } from "../components/ui/card";
 import { ServiceIcon } from "../components/ServiceIcon";
-import { timeAgo } from "../lib/format";
+import { SearchLinkIcon, searchUrl, timeAgo, useSearchLinks } from "../lib/format";
 import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
 import { Label as UiLabel } from "../components/ui/label";
@@ -708,6 +711,8 @@ export default function Settings() {
           <Hint>Keep previously-found releases on the Discover page for this many months after their release date (default 3). 0 = only current and upcoming.</Hint>
         </Section>
 
+        <PrewarmSection get={get} set={set} />
+
 
         <PluginsTab
             show={["discovery"]}
@@ -767,6 +772,8 @@ export default function Settings() {
         {section === "downloads" && (
           <>
         <QualityTab get={get} set={set} />
+
+        <SearchLinksSection get={get} set={set} />
 
         <FoldedCard title="Set up the download clients">
           <PluginsTab
@@ -2464,5 +2471,210 @@ function Check({
       <Checkbox checked={checked} onCheckedChange={(c) => onChange(c === true)} />
       <span>{children}</span>
     </label>
+  );
+}
+
+// The background pre-load of this month's releases (app/prewarm.py): its
+// switch, how often it runs, and a button to run it now.
+function PrewarmSection({
+  get,
+  set,
+}: {
+  get: (k: string) => string;
+  set: (k: string, v: string) => void;
+}) {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["prewarm"],
+    queryFn: () => api.prewarmStatus(),
+    refetchInterval: (query) => (query.state.data?.running ? 2000 : false),
+  });
+  const [busy, setBusy] = useState(false);
+  function toggle() {
+    setBusy(true);
+    (data?.running ? api.prewarmStop() : api.prewarmStart())
+      .then((state) => qc.setQueryData(["prewarm"], state))
+      .finally(() => setBusy(false));
+  }
+  const last = data?.last;
+  const status = data?.running
+    ? `Pre-loading ${data.done}/${data.total}${data.current ? ` - ${data.current}` : ""}`
+    : data?.message ||
+      (last
+        ? `Last run ${timeAgo(last.finished_at)}: ${last.playable} releases play their own tracks, ` +
+          `${last.fallback} the artist's top tracks, ${last.silent} nothing yet.`
+        : "Not run yet.");
+  return (
+    <Section>
+      <Legend>Pre-load audio</Legend>
+      <Hint>
+        Looks up what every release from the start of this week to a month out
+        plays from -- on Discover and on Upcoming -- so pressing play starts
+        straight away. A record that isn't out yet gets the artist's top tracks
+        instead, which is what Discover plays for it. The artists' genres come
+        along for the Discover rows.
+      </Hint>
+      <Check
+        checked={get("prewarm_audio_enabled") !== "false"}
+        onChange={(c) => set("prewarm_audio_enabled", c ? "true" : "false")}
+      >
+        Pre-load in the background
+      </Check>
+      <Label htmlFor="prewarm_audio_hours">Run every (hours)</Label>
+      <Input
+        id="prewarm_audio_hours"
+        type="number"
+        min={1}
+        step={1}
+        value={get("prewarm_audio_hours")}
+        onChange={(e) => set("prewarm_audio_hours", e.target.value)}
+      />
+      <Hint>Default 24. Releases already looked up are passed over, so a run after the first is quick.</Hint>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="outline" disabled={busy} onClick={toggle}>
+          {data?.running ? "Stop" : "Pre-load now"}
+        </Button>
+        <span className="text-sm text-muted-foreground">{status}</span>
+      </div>
+      {data?.running && data.total > 0 && (
+        <Progress value={Math.round((data.done / data.total) * 100)} className="mt-3" />
+      )}
+    </Section>
+  );
+}
+
+type SearchSite = { name: string; url: string; icon: string };
+
+function parseSearchSites(raw: string): SearchSite[] {
+  try {
+    const items = JSON.parse(raw || "[]");
+    if (!Array.isArray(items)) return [];
+    return items.map((it) => ({
+      name: String(it?.name ?? ""),
+      url: String(it?.url ?? ""),
+      icon: String(it?.icon ?? ""),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// Your own search sites (app/plugins/search/custom.py): each shows as an icon
+// beside every release's Last.fm / MusicBrainz / YouTube Music links.
+function SearchLinksSection({
+  get,
+  set,
+}: {
+  get: (k: string) => string;
+  set: (k: string, v: string) => void;
+}) {
+  const qc = useQueryClient();
+  const raw = get("search_custom_sites");
+  const sites = useMemo(() => parseSearchSites(raw), [raw]);
+  const saved = useSearchLinks();
+  const refresh = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => {
+    if (refresh.current) clearTimeout(refresh.current);
+  }, []);
+
+  function save(next: SearchSite[]) {
+    set("search_custom_sites", JSON.stringify(next));
+    // The icons everywhere else follow once the change has been written.
+    if (refresh.current) clearTimeout(refresh.current);
+    refresh.current = setTimeout(() => qc.invalidateQueries({ queryKey: ["searchLinks"] }), 2000);
+  }
+  function change(i: number, field: keyof SearchSite, value: string) {
+    save(sites.map((site, j) => (j === i ? { ...site, [field]: value } : site)));
+  }
+
+  return (
+    <Section>
+      <Legend>Search links</Legend>
+      <Hint>
+        Your own search sites, shown as icons beside the Last.fm, MusicBrainz and
+        YouTube Music links on every release. Put <code>{"{query}"}</code> where the
+        search words go -- the artist and title, e.g.{" "}
+        <code>https://example.com/torrents.php?searchstr={"{query}"}</code> --
+        or use <code>{"{artist}"}</code> and <code>{"{album}"}</code> on their own.
+        Without any, the words are added to the end. The icon is the site's own
+        unless you give one.
+      </Hint>
+      <div className="flex flex-col gap-2">
+        {sites.map((site, i) => {
+          const live = saved.find((l) => l.url === site.url.trim());
+          const valid = /^https?:\/\//i.test(site.url.trim());
+          return (
+            <div key={i} className="flex flex-wrap items-center gap-2">
+              <span className="flex size-6 flex-none items-center justify-center">
+                {live ? (
+                  <SearchLinkIcon link={live} size={20} />
+                ) : null}
+              </span>
+              <Input
+                aria-label="Name"
+                placeholder="Name"
+                value={site.name}
+                onChange={(e) => change(i, "name", e.target.value)}
+                className="w-32"
+              />
+              <Input
+                aria-label="Search URL"
+                placeholder="https://example.com/search?q={query}"
+                value={site.url}
+                onChange={(e) => change(i, "url", e.target.value)}
+                className="min-w-[12rem] flex-1 font-mono text-xs"
+              />
+              <Input
+                aria-label="Icon URL (optional)"
+                placeholder="Icon URL (optional)"
+                value={site.icon}
+                onChange={(e) => change(i, "icon", e.target.value)}
+                className="w-40"
+              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    asChild={valid}
+                    size="icon-sm"
+                    variant="ghost"
+                    disabled={!valid}
+                    aria-label="Try it"
+                  >
+                    {valid ? (
+                      <a
+                        href={searchUrl(site.url.trim(), "Bleachers", "I'm Not Joking")}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <LuExternalLink />
+                      </a>
+                    ) : (
+                      <LuExternalLink />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Try it: search for Bleachers - I'm Not Joking</TooltipContent>
+              </Tooltip>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Remove ${site.name || "this search"}`}
+                onClick={() => save(sites.filter((_s, j) => j !== i))}
+              >
+                <LuTrash2 />
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+      <Button
+        className="mt-3"
+        size="sm"
+        variant="outline"
+        onClick={() => save([...sites, { name: "", url: "", icon: "" }])}
+      >
+        <LuPlus /> Add a search
+      </Button>
+    </Section>
   );
 }

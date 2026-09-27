@@ -135,6 +135,8 @@ export interface DiscoverItem {
   artist_id?: number | null;
   artist_url?: string | null;
   album_url?: string | null;
+  // The artist's own genre tags (the release's are `genres`), when known.
+  artist_genres?: string[];
 }
 
 export interface DiscoverSourceStatus {
@@ -753,4 +755,34 @@ export interface ArtworkReviewResponse {
   total: number;
   dismissed: number;
   artists: ArtworkReviewArtist[];
+}
+
+// The background pre-load of this month's releases (app/prewarm.py).
+export interface PrewarmState {
+  running: boolean;
+  enabled: boolean;
+  done: number;
+  total: number;
+  current: string;
+  playable: number;
+  fallback: number;
+  silent: number;
+  message: string;
+  started?: boolean;
+  last?: {
+    finished_at: number;
+    total: number;
+    playable: number;
+    fallback: number;
+    silent: number;
+  } | null;
+}
+
+// One of the user's own search sites, shown beside every release's links.
+export interface SearchLink {
+  name: string;
+  // Search URL with {query} / {artist} / {album}, or none (query appended).
+  url: string;
+  // Where to load its icon from (in-app).
+  icon: string;
 }

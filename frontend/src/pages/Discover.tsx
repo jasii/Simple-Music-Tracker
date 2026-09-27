@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink } from "react-router-dom";
-import { LuBell, LuBellRing, LuEyeOff, LuUserX } from "react-icons/lu";
+import { LuBell, LuBellRing, LuEyeOff, LuLoaderCircle, LuPause, LuPlay, LuUserX } from "react-icons/lu";
+import { toast } from "sonner";
 import { api } from "../api";
 import { AlbumArt } from "../components/AlbumArt";
 import { ArtistLink, linkArtistNames, useOpenArtist } from "../components/ArtistLink";
+import {
+  usePreviewPlayer,
+  type PreviewTrack,
+  type QueueContinuation,
+} from "../components/PreviewPlayer";
 import type { DiscoverItem, DiscoverSourceStatus, DiscoverSourceTag, LastfmArtist, SimilarRanking } from "../types";
 import { useNav } from "../nav";
 import { Agenda, Calendar, ViewToggle } from "../components/RelView";
@@ -84,6 +90,138 @@ function albumHref(r: DiscoverItem): string | null {
 
 type DiscoverCache = { sources: DiscoverSourceStatus[]; items: DiscoverItem[] };
 
+// --- Playing the feed ------------------------------------------------------
+// A row's play button plays the release's tracks; with "Continue to next
+// artist" on, the player walks on down the list when they run out. All of it
+// lives outside the component, because the player (and so the walk) outlives
+// the page: it keeps going after you navigate away.
+
+const CONTINUE_KEY = "discoverContinue";
+
+function continueOn(): boolean {
+  try { return localStorage.getItem(CONTINUE_KEY) === "true"; } catch { return false; }
+}
+
+// Which row a playing track came from, so that row can be marked.
+function playGroup(r: DiscoverItem): string {
+  return `discover:${(r.artist || "").toLowerCase()}|${(r.album || "").toLowerCase()}`;
+}
+
+// A release nobody has opened is resolved while you wait (its tracklist, then
+// where each track plays from). The pre-load job has usually done this; if
+// not, this is how long to wait before playing whatever was found.
+const RESOLVE_WAIT_MS = 60_000;
+const TOP_TRACKS = 10;
+
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * What a row plays: the release's own tracks that have audio, else -- the
+ * record isn't out yet -- the artist's top tracks, with a note saying so.
+ */
+async function releaseQueue(
+  r: DiscoverItem,
+  onProgress?: (done: number, total: number) => void,
+): Promise<PreviewTrack[]> {
+  const artist = r.artist || "";
+  const album = r.album || "";
+  if (!artist) return [];
+  const group = playGroup(r);
+  if (album) {
+    const mbid = r.mbid || undefined;
+    const until = Date.now() + RESOLVE_WAIT_MS;
+    let found = await api.albumPlayable(artist, album, mbid);
+    while (!found.ready && found.running && Date.now() < until) {
+      onProgress?.(found.progress?.done ?? 0, found.progress?.total ?? 0);
+      await sleep(1500);
+      found = await api.albumPlayable(artist, album, mbid);
+    }
+    const titles = found.order?.length ? found.order : Object.keys(found.tracks || {});
+    // Only what streams through the player: a video embed can't say when
+    // it's finished, so it would stall the walk down the list.
+    const own: PreviewTrack[] = titles.flatMap((title) => {
+      const t = found.tracks?.[title];
+      if (!t?.stream) return [];
+      return [{
+        title,
+        artist,
+        artistId: r.artist_id,
+        album,
+        note: t.label ?? null,
+        noteUrl: t.source_url ?? null,
+        noteIcon: t.icon ?? null,
+        group,
+        src: t.stream,
+      }];
+    });
+    if (own.length) return own;
+  }
+  const top = await api.artistTopTracksByName(artist, TOP_TRACKS).catch(() => null);
+  const queueNote = album
+    ? `No music found for "${album}", so playing ${artist}'s top tracks`
+    : `Playing ${artist}'s top tracks`;
+  return (top?.tracks ?? [])
+    .filter((t) => t.stream)
+    .map((t) => ({
+      title: t.name,
+      artist,
+      artistId: r.artist_id,
+      album: t.album,
+      url: t.url,
+      note: t.library ?? null,
+      noteUrl: t.library_url ?? null,
+      noteIcon: t.library_icon ?? null,
+      group,
+      queueNote,
+      src: t.stream,
+    }));
+}
+
+/** After row *index* of *list*: the next row down that has anything to play. */
+function continueFrom(list: DiscoverItem[], index: number): QueueContinuation {
+  return async () => {
+    for (let i = index + 1; i < list.length; i += 1) {
+      // Read each time, so switching it off mid-album stops at the album's end.
+      if (!continueOn()) return null;
+      const queue = await releaseQueue(list[i]!).catch(() => []);
+      if (queue.length) return { queue, next: continueFrom(list, i) };
+    }
+    return null;
+  };
+}
+
+type Starting = { group: string; done: number; total: number };
+
+// Last.fm tags come as "hip.hop" and "rock_and_roll"; shown as words.
+function genreLabel(g: string): string {
+  return g.replace(/[._]/g, " ").trim();
+}
+function genreKey(g: string): string {
+  return g.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+/** Has this element come near the screen yet? Stays true once it has. */
+function useSeen<T extends Element>() {
+  const ref = useRef<T>(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || seen || typeof IntersectionObserver === "undefined") return;
+    const watcher = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setSeen(true);
+          watcher.disconnect();
+        }
+      },
+      { rootMargin: "300px" },
+    );
+    watcher.observe(el);
+    return () => watcher.disconnect();
+  }, [seen]);
+  return [ref, seen] as const;
+}
+
 export default function Discover() {
   const nav = useNav();
   const qc = useQueryClient();
@@ -120,6 +258,12 @@ export default function Discover() {
   const [justFollowed, setJustFollowed] = useState<Set<string>>(new Set());
   const pollTimer = useRef<ReturnType<typeof setTimeout>>();
   const sourceAnchor = useComboboxAnchor();
+  const player = usePreviewPlayer();
+  // When a release's tracks run out, carry on with the next one down the list.
+  const [continueNext, setContinueNext] = useState<boolean>(continueOn);
+  // The row whose audio is being looked up, and how far along that is.
+  const [starting, setStarting] = useState<Starting | null>(null);
+  const startToken = useRef(0);
 
   const load = useCallback(
     (refresh?: string | false, poll = false) => {
@@ -193,6 +337,10 @@ export default function Discover() {
     setHideOwned(v);
     try { localStorage.setItem("discoverHideOwned", String(v)); } catch {}
   }
+  function changeContinue(v: boolean) {
+    setContinueNext(v);
+    try { localStorage.setItem(CONTINUE_KEY, String(v)); } catch {}
+  }
 
   function setFollowing(artist: string, following: boolean) {
     setItems((prev) =>
@@ -265,6 +413,38 @@ export default function Discover() {
 
   const noSources = loaded && !configuredAny;
 
+  // Play a row: pause/resume when it's the one playing, else look up what it
+  // plays from and start, handing the player the rest of the list to go on to.
+  function playRow(r: DiscoverItem) {
+    const group = playGroup(r);
+    if (player.current && player.current.group === group) {
+      player.toggle([player.current], 0);
+      return;
+    }
+    const token = ++startToken.current;
+    setStarting({ group, done: 0, total: 0 });
+    // The list as it's shown right now, top to bottom.
+    const list = agendaItems.filter((it) => it.artist);
+    const index = list.indexOf(r);
+    releaseQueue(r, (done, total) => {
+      if (token === startToken.current) setStarting({ group, done, total });
+    })
+      .then((queue) => {
+        if (token !== startToken.current) return;
+        if (!queue.length) {
+          toast.error(`Nothing to play for ${r.artist}${r.album ? ` - ${r.album}` : ""}.`);
+          return;
+        }
+        player.toggle(queue, 0, continueFrom(list, index));
+      })
+      .catch(() => {
+        if (token === startToken.current) toast.error(`Could not look up ${r.album || r.artist}.`);
+      })
+      .finally(() => {
+        if (token === startToken.current) setStarting(null);
+      });
+  }
+
   // Live status line: counts reflect the source checkboxes (client-side filter),
   // so toggling Last.fm / Metacritic updates the number immediately.
   const shownCount = sources.filter((s) => s.configured && !s.error && !hidden.has(s.key)).length;
@@ -319,6 +499,18 @@ export default function Discover() {
                     <Switch id="discover-show-past" checked={showPast} onCheckedChange={changeShowPast} />
                     <Label htmlFor="discover-show-past">Past weeks</Label>
                   </div>
+                  <Separator orientation="vertical" className="h-6" />
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="flex items-center gap-2">
+                        <Switch id="discover-continue" checked={continueNext} onCheckedChange={changeContinue} />
+                        <Label htmlFor="discover-continue">Continue to next artist</Label>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      When a release's tracks finish playing, go on to the next one down the list.
+                    </TooltipContent>
+                  </Tooltip>
                 </>
               )}
               <Separator orientation="vertical" className="h-6" />
@@ -395,7 +587,19 @@ export default function Discover() {
           ) : (
             <Agenda
               items={agendaItems}
-              renderItem={(r, k) => <AgendaRow key={k} r={r} hidden={hidden} onFollow={follow} onUnfollow={unfollow} onNotify={setNotify} onIgnore={ignore} />}
+              renderItem={(r, k) => (
+                <AgendaRow
+                  key={k}
+                  r={r}
+                  hidden={hidden}
+                  onFollow={follow}
+                  onUnfollow={unfollow}
+                  onNotify={setNotify}
+                  onIgnore={ignore}
+                  onPlay={playRow}
+                  starting={starting && starting.group === playGroup(r) ? starting : null}
+                />
+              )}
               emptyMsg={emptyState}
             />
           )}
@@ -420,6 +624,8 @@ function AgendaRow({
   onUnfollow,
   onNotify,
   onIgnore,
+  onPlay,
+  starting,
 }: {
   r: DiscoverItem;
   hidden: Set<string>;
@@ -427,8 +633,42 @@ function AgendaRow({
   onUnfollow: (a: string) => Promise<void>;
   onNotify: (a: string, on: boolean) => Promise<void>;
   onIgnore: (a: string, album?: string) => Promise<void>;
+  onPlay: (r: DiscoverItem) => void;
+  starting: Starting | null;
 }) {
   const href = albumHref(r);
+  const player = usePreviewPlayer();
+  const active = !!player.current && player.current.group === playGroup(r);
+  const [rowRef, seen] = useSeen<HTMLDivElement>();
+  // Walking down the list moves the mark out of view: follow it. Only when
+  // it arrives, not when the page opens on a row that was already playing.
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && !wasActive.current) {
+      rowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+    wasActive.current = active;
+  }, [active, rowRef]);
+  // The artist's own tags. The feed carries them when they're known; else
+  // they're looked up once the row nears the screen (one lookup at a time,
+  // shared with Similar Artists, cached for a week).
+  const known = r.artist_genres ?? [];
+  const { data: info } = useQuery({
+    queryKey: ["similarInfo", (r.artist || "").toLowerCase()],
+    queryFn: () => queuedSimilarInfo(r.artist!),
+    enabled: seen && !!r.artist && !known.length,
+    staleTime: Infinity,
+  });
+  // Shown once each: "Singer-Songwriter" and "singer/songwriter" are one tag.
+  const seenTags = new Set<string>();
+  const fresh = (g: string) => {
+    const key = genreKey(g);
+    if (!key || seenTags.has(key)) return false;
+    seenTags.add(key);
+    return true;
+  };
+  const artistGenres = (known.length ? known : info?.genres ?? []).map(genreLabel).filter(fresh).slice(0, 6);
+  const releaseGenres = (r.genres ?? []).map(genreLabel).filter(fresh);
   const [busy, setBusy] = useState(false);
   // Seeded from the feed, which knows whether this artist is set to Notify --
   // a bell that starts "off" for an artist who already notifies is a lie.
@@ -454,9 +694,37 @@ function AgendaRow({
     setHideBusy(true);
     onIgnore(r.artist, album).finally(() => setHideBusy(false));
   }
+  const playLabel = active && player.playing ? "Pause" : active ? "Resume" : "Play this release";
   return (
-    <div className="flex items-center gap-3 py-2.5">
-      <AlbumArt src={r.image} boxSize="150px" rounded="md" />
+    <div
+      ref={rowRef}
+      className={
+        "-mx-2 flex scroll-mt-20 scroll-mb-36 items-center gap-3 rounded-lg px-2 py-2.5 transition-colors" +
+        (active ? " bg-primary/10 ring-1 ring-primary/40" : "")
+      }
+    >
+      <div className="relative flex-none">
+        <AlbumArt src={r.image} boxSize="150px" rounded="md" />
+        {r.artist && (
+          <Button
+            size="icon-sm"
+            variant={active ? "default" : "secondary"}
+            aria-label={playLabel}
+            title={playLabel}
+            disabled={!!starting}
+            onClick={() => onPlay(r)}
+            className="absolute right-1.5 bottom-1.5 rounded-full shadow-md"
+          >
+            {starting ? (
+              <LuLoaderCircle className="animate-spin" />
+            ) : active && player.playing ? (
+              <LuPause />
+            ) : (
+              <LuPlay />
+            )}
+          </Button>
+        )}
+      </div>
       <div className="min-w-0 flex-1">
         <p className="font-semibold">
           {href ? (
@@ -478,10 +746,18 @@ function AgendaRow({
             {linkArtistNames(r.context, r.context_artists)}
           </p>
         )}
-        {r.genres && r.genres.length > 0 && (
+        {(artistGenres.length > 0 || releaseGenres.length > 0) && (
           <div className="mt-1 flex flex-wrap gap-1.5">
-            {r.genres.map((g) => (
-              <Badge key={g} variant="outline" className="capitalize text-muted-foreground">{g}</Badge>
+            {/* The artist's genres filled, the release's own outlined. */}
+            {artistGenres.map((g) => (
+              <Badge key={"a:" + g} variant="secondary" className="capitalize" title={`${r.artist}: ${g}`}>
+                {g}
+              </Badge>
+            ))}
+            {releaseGenres.map((g) => (
+              <Badge key={"r:" + g} variant="outline" className="capitalize text-muted-foreground" title={`This release: ${g}`}>
+                {g}
+              </Badge>
             ))}
           </div>
         )}
@@ -490,7 +766,7 @@ function AgendaRow({
             <Badge key={s.key} variant="secondary" className={srcBadge(s.key as string)}>{s.label}</Badge>
           ))}
         </div>
-        <div className="mt-2 flex items-center gap-1.5">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <Button
             size="xs"
             variant={r.following ? "outline" : "default"}
@@ -544,6 +820,11 @@ function AgendaRow({
                 onConfirm={() => runIgnore()}
               />
             </>
+          )}
+          {starting && (
+            <span className="text-xs text-muted-foreground">
+              finding audio{starting.total ? ` ${starting.done}/${starting.total}` : ""}...
+            </span>
           )}
         </div>
       </div>

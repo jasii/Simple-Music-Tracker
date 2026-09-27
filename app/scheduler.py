@@ -9,7 +9,7 @@ re-read from settings each tick so changes take effect without a restart:
 import threading
 import time
 
-from . import db, downloads, gaps, grabber, hype, plugins, scans, tracker
+from . import db, downloads, gaps, grabber, hype, plugins, prewarm, scans, tracker
 # Importing the discovery package registers its plugins with the registry.
 from .plugins import discovery as _discovery  # noqa: F401
 
@@ -23,6 +23,9 @@ _tasks = {
                 "unit": "hours", "default": 12, "last": 0.0},
     "discover": {"label": "Re-scrape Discover sources", "setting": "discover_refresh_hours",
                  "unit": "hours", "default": 24, "last": 0.0},
+    "prewarm": {"label": "Pre-load audio for this month's releases",
+                "setting": "prewarm_audio_hours", "unit": "hours", "default": 24,
+                "last": 0.0, "enabled_setting": "prewarm_audio_enabled"},
     "autograb": {"label": "Automatic grabbing", "setting": "autograb_interval_minutes",
                  "unit": "minutes", "default": 60, "last": 0.0,
                  "enabled_setting": "autograb_enabled"},
@@ -104,6 +107,9 @@ def _loop():
     # Don't scrape Discover the instant we boot; the page fills it on demand and
     # the scheduler keeps it fresh on the configured cadence after that.
     last_discover = time.time()
+    # The pre-load reads the stored scrapes, so it can go soon after boot --
+    # but not in the same breath as everything else.
+    last_prewarm = time.time() - _hours("prewarm_audio_hours", 24, 1) * 3600 + 600
 
     while True:
         now = time.time()
@@ -130,6 +136,17 @@ def _loop():
                     plugin.fetch(force=True)
                 except Exception:  # noqa: BLE001 - never let the scheduler thread die
                     pass
+
+        # Look up what this month's releases play from, so play is instant.
+        # Its own thread: a first run is minutes of lookups, and the jobs
+        # below (downloads, webhooks) can't wait that long.
+        if now - last_prewarm >= _hours("prewarm_audio_hours", 24, 1) * 3600:
+            last_prewarm = now
+            try:
+                if prewarm.enabled() and prewarm.start():
+                    _ran("prewarm")
+            except Exception:  # noqa: BLE001 - never let the scheduler thread die
+                pass
 
         # Libraries re-scan on their own schedules. Enqueueing rather than
         # running means several falling due together queue up instead of

@@ -29,6 +29,8 @@ import type {
   SystemInfo,
   LibraryGapsResponse,
   PluginInfo,
+  PrewarmState,
+  SearchLink,
   SimilarArtistInfo,
   SimilarEnrichState,
   SimilarRankingsResponse,
@@ -338,6 +340,8 @@ export const api = {
       ready: boolean;
       running: boolean;
       progress?: { done?: number; total?: number };
+      // The track titles in tracklist order.
+      order?: string[];
       tracks: Record<string, {
         kind: string;
         label?: string;
@@ -383,6 +387,17 @@ export const api = {
     getJSON<ArtistExclusives>(`/api/artists/${id}/exclusives`),
   artistTopTracks: (id: number, limit = 5) =>
     getJSON<ArtistTopTracksResponse>(`/api/artists/${id}/top-tracks?limit=${limit}`),
+  // The same, by name: for artists who aren't in the library (Discover).
+  artistTopTracksByName: (artist: string, limit = 5) =>
+    getJSON<ArtistTopTracksResponse>(
+      `/api/artist-top-tracks?artist=${encodeURIComponent(artist)}&limit=${limit}`,
+    ),
+  // The user's own search sites (Settings > Downloads & quality).
+  searchLinks: () => getJSON<{ links: SearchLink[] }>("/api/search-links"),
+  // Pre-load what this month's releases play from.
+  prewarmStatus: () => getJSON<PrewarmState>("/api/prewarm/status"),
+  prewarmStart: () => postJSON<PrewarmState>("/api/prewarm"),
+  prewarmStop: () => postJSON<PrewarmState>("/api/prewarm", { stop: true }),
   similarRankings: () =>
     getJSON<SimilarRankingsResponse>("/api/similar/rankings"),
   // Image/genres/bio for one suggested artist (cached a week server-side).

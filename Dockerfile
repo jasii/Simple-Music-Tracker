@@ -30,11 +30,20 @@ COPY app ./app
 # Drop in the built SPA produced by the frontend stage.
 COPY --from=frontend /build/app/static/spa ./app/static/spa
 
+# The app runs as this account, re-numbered at start to PUID/PGID (default
+# 1000:1000) so files under /data belong to you on the host. See
+# docker-entrypoint.sh.
+RUN groupadd -g 1000 app \
+    && useradd -u 1000 -g app -d /home/app -m -s /usr/sbin/nologin app
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
 # Persisted SQLite database lives here; mount a volume to keep it.
-RUN mkdir -p /data
+RUN mkdir -p /data && chown app:app /data
 VOLUME ["/data"]
 
 EXPOSE 8080
+
+ENTRYPOINT ["docker-entrypoint.sh"]
 
 # A single worker with threads keeps the in-process scheduler and scan/refresh
 # state consistent (multiple workers would each run their own copy). Threads

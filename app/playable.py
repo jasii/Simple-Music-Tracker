@@ -145,7 +145,7 @@ def status(artist, album, tracks, *, build=True):
     """
     titles = [t for t, _u in tracks if t]
     if not artist or not album or not titles:
-        return {"ready": False, "running": False, "tracks": {},
+        return {"ready": False, "running": False, "tracks": {}, "order": [],
                 "progress": {"done": 0, "total": 0}}
     cache_key = _key(artist, album)
     fingerprint = _fingerprint(titles)
@@ -177,4 +177,34 @@ def status(artist, album, tracks, *, build=True):
         "progress": {"done": len(resolved), "total": len(titles)},
         # Partial answers are worth showing: those rows can play already.
         "tracks": resolved,
+        # Tracklist order: a JSON object can't be trusted to keep it (a
+        # browser puts a title like "1979" first).
+        "order": titles,
     }
+
+
+def build(artist, album, tracks, wait_s=600):
+    """Resolve one release's map in the calling thread and return its tracks.
+
+    The background pass behind :func:`status`, run synchronously for a caller
+    that works through releases one at a time (the pre-load job): a map that
+    is already good is returned as it stands, and one being built elsewhere is
+    waited on rather than built twice.
+    """
+    titles = [t for t, _u in tracks if t]
+    if not artist or not album or not titles:
+        return {}
+    current = status(artist, album, tracks, build=False)
+    if current["ready"]:
+        return current["tracks"]
+    cache_key = _key(artist, album)
+    with _jobs_lock:
+        running = _jobs.get(cache_key)
+        if running is None:
+            _jobs[cache_key] = threading.current_thread()
+    if running is not None:
+        running.join(timeout=wait_s)
+    else:
+        # _run takes the job off the list when it's done, like a thread would.
+        _run(artist, album, tracks, _fingerprint(titles))
+    return status(artist, album, tracks, build=False)["tracks"]

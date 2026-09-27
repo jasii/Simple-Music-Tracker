@@ -17,4 +17,8 @@ services:
       # - ${MUSIC_DIR:-/path/to/your/music}:/music:ro
     environment:
       - SMT_DB_PATH=/data/tracker.db
+      # Who the app runs as, so the files it writes to /data are yours on the
+      # host. Set these to your own ids (run `id` on the host). PUID=0 = root.
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
     restart: unless-stopped

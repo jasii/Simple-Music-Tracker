@@ -47,6 +47,7 @@ from . import (
     musicbrainz,
     playable,
     plugins,
+    prewarm,
     preview,
     quality,
     scanner,
@@ -67,6 +68,7 @@ from .plugins import library  # noqa: F401 - registers library plugins
 from .plugins import downloader  # noqa: F401 - registers download clients (and its client lookup)
 from .plugins import solver  # noqa: F401 - registers challenge solvers
 from .plugins import notifier  # noqa: F401 - registers notification services
+from .plugins import search as search_plugins  # registers search-link plugins
 
 app = Flask(__name__)
 
@@ -1179,16 +1181,45 @@ def api_artist_top_tracks(artist_id):
         conn.close()
     if row is None:
         return jsonify({"error": "artist not found"}), 404
+    return jsonify({"artist": row["name"],
+                    "tracks": top_tracks_playable(row["name"], _top_tracks_limit())})
+
+
+@app.route("/api/artist-top-tracks")
+def api_artist_top_tracks_by_name():
+    """The same as /api/artists/<id>/top-tracks, for any artist name.
+
+    Discover plays a release's tracks, and for a record that isn't out yet
+    (nothing on it to play) falls back to these -- for artists who aren't in
+    the library too. Params: artist, limit (1-10, default 5).
+    """
+    artist = (request.args.get("artist") or "").strip()
+    if not artist:
+        return jsonify({"error": "artist is required"}), 400
+    return jsonify({"artist": artist,
+                    "tracks": top_tracks_playable(artist, _top_tracks_limit())})
+
+
+def _top_tracks_limit():
     try:
-        limit = max(1, min(int(request.args.get("limit") or 5), 10))
+        return max(1, min(int(request.args.get("limit") or 5), 10))
     except (TypeError, ValueError):
-        limit = 5
-    tracks = lastfm.top_tracks(row["name"], limit=limit)
+        return 5
+
+
+def top_tracks_playable(artist, limit):
+    """An artist's Last.fm top tracks, each with where it plays from.
+
+    Names and playcounts come from Last.fm; the sample URLs from the keyless
+    catalogues (see app/preview.py). All of it is stored, so this is one round
+    of lookups per artist -- which the pre-load job pays ahead of time.
+    """
+    tracks = lastfm.top_tracks(artist, limit=limit)
     # The user's own copy beats a thirty-second sample, so ask the libraries
     # first and only look a sample up for what they haven't got.
-    owned = librarytrack.markers(row["name"], [t["name"] for t in tracks])
+    owned = librarytrack.markers(artist, [t["name"] for t in tracks])
     samples = preview.for_tracks(
-        row["name"], [t["name"] for t in tracks if not owned.get(t["name"])]
+        artist, [t["name"] for t in tracks if not owned.get(t["name"])]
     )
     for track in tracks:
         mark = owned.get(track["name"]) or {}
@@ -1199,7 +1230,7 @@ def api_artist_top_tracks(artist_id):
         track["library_icon"] = mark.get("icon")
         if not mark and track["preview"]:
             # Not ours: say which catalogue the sample came from instead.
-            sample = preview.cached_details(row["name"], track["name"]) or {}
+            sample = preview.cached_details(artist, track["name"]) or {}
             track["library"] = sample.get("label")
             track["library_url"] = sample.get("page")
             track["library_icon"] = sample.get("icon")
@@ -1207,11 +1238,11 @@ def api_artist_top_tracks(artist_id):
         track["full"] = bool(mark)
         track["duration"] = mark.get("duration")
         track["stream"] = (
-            _track_stream_url(row["name"], track["name"])
+            _track_stream_url(artist, track["name"])
             if mark or track["preview"]
             else None
         )
-    return jsonify({"artist": row["name"], "tracks": tracks})
+    return tracks
 
 
 def _artist_ids(payload):
@@ -1666,11 +1697,15 @@ def _flag_known_artists(items):
     try:
         placeholders = ",".join("?" for _ in names)
         rows = conn.execute(
-            f"SELECT id, sort_name, subscription FROM artists "
+            f"SELECT id, sort_name, subscription, genres FROM artists "
             f"WHERE sort_name IN ({placeholders})",
             list(names),
         ).fetchall()
         known = {r["sort_name"]: (r["id"], r["subscription"]) for r in rows}
+        # The artist's own genre tags: kept on the row when there is one, else
+        # whatever the suggested-artist lookup cached (the pre-load job fills
+        # that in for this month's releases).
+        artist_genres = {r["sort_name"]: db.parse_genres(r["genres"]) for r in rows}
         # Which of those artists' albums the library already holds, by title key
         # and by release-group mbid (set when the library source tagged one).
         owned_keys = set()
@@ -1688,7 +1723,11 @@ def _flag_known_artists(items):
                     owned_mbids.add(r["rg_mbid"])
     finally:
         conn.close()
+    missing = [n for n in names if not artist_genres.get(n)]
+    for key, entry in db.get_json_cache_many([f"simartinfo:{n}" for n in missing]).items():
+        artist_genres[key[len("simartinfo:"):]] = (entry or {}).get("genres") or []
     for it in items:
+        it["artist_genres"] = artist_genres.get((it.get("artist") or "").lower()) or []
         aid, sub = known.get((it.get("artist") or "").lower(), (None, None))
         it["artist_id"] = aid
         it["in_library"] = sub is not None
@@ -1838,7 +1877,22 @@ def api_discover_releases():
     when asked: ?refresh=<source-key> for one, ?refresh=all (or =1) for every
     source. Each source reports `refreshing` so the page can poll until done.
     """
-    refresh = request.args.get("refresh")
+    sources, items = discover_feed(request.args.get("refresh"))
+    return jsonify({
+        "sources": sources,
+        "count": len(items),
+        "items": items,
+        "refreshing": any(s.get("refreshing") for s in sources),
+    })
+
+
+def discover_feed(refresh=None, kick=True):
+    """(sources, items): the merged Discover feed, as the page shows it.
+
+    Served from the stored scrapes. With *kick* a stale source (or the one
+    *refresh* names, or all of them for "all"/"1") is re-scraped in the
+    background; the pre-load job reads the feed without starting any.
+    """
     refresh_all = refresh in ("all", "1")
     ttl = _discover_ttl_seconds()
     items = []
@@ -1850,7 +1904,7 @@ def api_discover_releases():
         if entry["configured"]:
             fetched_at, cached_items = db.get_discover_cache(key)
             stale = (not fetched_at) or (not cached_items) or (time.time() - fetched_at > ttl)
-            if refresh_all or refresh == key or stale:
+            if kick and (refresh_all or refresh == key or stale):
                 _kick_refresh(key, plugin)
             entry["count"] = len(cached_items)
             entry["fetched_at"] = fetched_at
@@ -1894,12 +1948,7 @@ def api_discover_releases():
     items = _drop_non_artists(items)
     _flag_known_artists(items)
     items.sort(key=lambda r: r.get("normalized_date") or "9999")
-    return jsonify({
-        "sources": sources,
-        "count": len(items),
-        "items": items,
-        "refreshing": any(s.get("refreshing") for s in sources),
-    })
+    return sources, items
 
 
 @app.route("/api/discover/ignores", methods=["GET", "POST"])
@@ -2195,6 +2244,64 @@ def api_similar_artist_info():
     if not name:
         return jsonify({})
     return jsonify(similar.artist_info(name))
+
+
+def art_url(url):
+    """The in-app address of a remote image, through the on-disk cache."""
+    return "/art?" + urlencode({"u": url})
+
+
+@app.route("/api/search-links")
+def api_search_links():
+    """The user's own search sites, for the icons beside every release.
+
+    Each: {name, url (a template with {query}/{artist}/{album}), icon (where
+    to load the icon from)}. The icon is an in-app URL, so a site's favicon is
+    looked up once, on the server, and served from the image cache after.
+    """
+    out = []
+    for index, site in enumerate(search_plugins.all_sites()):
+        out.append({
+            "name": site["name"],
+            "url": site["url"],
+            "icon": (art_url(site["icon"]) if site["icon"] else
+                     f"/api/search-links/{index}/icon?v={search_plugins.version(site)}"),
+        })
+    return jsonify({"links": out})
+
+
+@app.route("/api/search-links/<int:index>/icon")
+def api_search_link_icon(index):
+    """One search site's favicon, through the image cache. 404 when it has none."""
+    sites = search_plugins.all_sites()
+    if index >= len(sites):
+        abort(404)
+    icon = search_plugins.site_icon(sites[index])
+    if not icon:
+        return "", 404, {"Cache-Control": "public, max-age=3600"}
+    resp = redirect(art_url(icon))
+    # Keyed by ?v=, which changes with the site: a long cache is safe.
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+
+@app.route("/api/prewarm", methods=["POST"])
+def api_prewarm():
+    """Start (or stop, with {"stop": true}) the pre-load of this month's
+    releases: what each one plays from, looked up ahead of time."""
+    payload = request.get_json(silent=True) or {}
+    if payload.get("stop"):
+        prewarm.stop()
+        return jsonify(prewarm.get_state())
+    started = prewarm.start()
+    state = prewarm.get_state()
+    state["started"] = started
+    return jsonify(state)
+
+
+@app.route("/api/prewarm/status")
+def api_prewarm_status():
+    return jsonify(prewarm.get_state())
 
 
 @app.route("/api/similar/scan", methods=["POST"])
@@ -2593,7 +2700,18 @@ def api_upcoming_releases():
 
     start = _parse(request.args.get("from"), today)
     end = _parse(request.args.get("to"), today + timedelta(days=366))
+    items = upcoming_between(start, end)
+    return jsonify({
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "count": len(items),
+        "releases": items,
+    })
 
+
+def upcoming_between(start, end):
+    """Followed artists' releases dated *start* to *end*, soonest first."""
+    today = date.today()
     conn = db.get_connection()
     try:
         rows = conn.execute(
@@ -2617,12 +2735,7 @@ def api_upcoming_releases():
         items.append(item)
     items.sort(key=lambda r: r["normalized_date"])
     _apply_art_overrides(items)
-    return jsonify({
-        "from": start.isoformat(),
-        "to": end.isoformat(),
-        "count": len(items),
-        "releases": items,
-    })
+    return items
 
 
 @app.route("/api/upcoming/playlist", methods=["POST"])

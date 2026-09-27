@@ -1,4 +1,9 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { LuSearch } from "react-icons/lu";
+import { api } from "../api";
 import { ServiceIcon } from "../components/ServiceIcon";
+import type { SearchLink } from "../types";
 
 export function formatDate(iso?: string | null): string {
   if (!iso) return "date TBA";
@@ -37,8 +42,69 @@ export function relativeDays(days: number): string {
   return "in " + days + " days";
 }
 
-// External lookup icons (Last.fm / MusicBrainz / YouTube Music) for a release.
-// MusicBrainz links the release-group directly when its mbid is known.
+// Form-style encoding, as a search box submits it: spaces as "+", and the
+// characters encodeURIComponent leaves alone (' ! ( ) *) escaped too, so
+// "bleachers i'm not joking" reads bleachers+i%27m+not+joking.
+function formEncode(value: string): string {
+  return encodeURIComponent(value)
+    .replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())
+    .replace(/%20/g, "+");
+}
+
+const SEARCH_PLACEHOLDER = /\{(query|artist|album)\}/;
+
+/**
+ * A search site's URL for one release. {query} is the artist and title
+ * together; {artist} and {album} are each on their own. A URL with none of
+ * them gets the query added to the end.
+ */
+export function searchUrl(template: string, artist: string, album: string): string {
+  const query = [artist, album].filter(Boolean).join(" ");
+  if (!SEARCH_PLACEHOLDER.test(template)) return template + formEncode(query);
+  return template
+    .replace(/\{query\}/g, formEncode(query))
+    .replace(/\{artist\}/g, formEncode(artist))
+    .replace(/\{album\}/g, formEncode(album));
+}
+
+// The user's own search sites. Every release on a page shows them, so one
+// request serves the lot, and it's kept for a while.
+export function useSearchLinks(): SearchLink[] {
+  const { data } = useQuery({
+    queryKey: ["searchLinks"],
+    queryFn: () => api.searchLinks(),
+    staleTime: 10 * 60_000,
+  });
+  return data?.links ?? [];
+}
+
+// A site's icon, or a plain magnifier when it has none (or it won't load).
+export function SearchLinkIcon({ link, size, className }: {
+  link: SearchLink;
+  size: number;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (failed || !link.icon) {
+    return <LuSearch aria-hidden size={size} className={className} />;
+  }
+  return (
+    <img
+      src={link.icon}
+      alt=""
+      width={size}
+      height={size}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className={"rounded-sm object-contain " + (className ?? "")}
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
+// External lookup icons (Last.fm / MusicBrainz / YouTube Music) for a release,
+// then the user's own search sites. MusicBrainz links the release-group
+// directly when its mbid is known.
 export function ReleaseIcons({
   artist,
   album,
@@ -59,6 +125,7 @@ export function ReleaseIcons({
     encodeURIComponent((artist || "") + " " + (album || ""));
   // Quiet until hovered: these are a footnote on the page, not its subject.
   const iconCls = "grayscale opacity-45 transition hover:grayscale-0 hover:opacity-100";
+  const searches = useSearchLinks();
   return (
     <div className="mt-1 flex gap-3">
       <a href={`https://www.last.fm/music/${a}/${al}`} target="_blank" rel="noopener noreferrer"
@@ -71,6 +138,17 @@ export function ReleaseIcons({
       <a href={ytHref} target="_blank" rel="noopener noreferrer" title="YouTube Music">
         <ServiceIcon name="youtube" size={22} className={iconCls} />
       </a>
+      {searches.map((link, i) => (
+        <a
+          key={i}
+          href={searchUrl(link.url, artist || "", album || "")}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Search ${link.name}`}
+        >
+          <SearchLinkIcon link={link} size={22} className={iconCls} />
+        </a>
+      ))}
     </div>
   );
 }

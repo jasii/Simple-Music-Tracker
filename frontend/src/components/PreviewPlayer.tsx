@@ -25,8 +25,21 @@ export type PreviewTrack = {
   noteUrl?: string | null;
   /** The source's own mark, shown before the note (see ServiceIcon). */
   noteIcon?: string | null;
+  /** Which row of a list this came from, so the list can mark what's playing. */
+  group?: string | null;
+  /** A line about the whole queue: why these are the tracks playing. */
+  queueNote?: string | null;
   src: string | null | undefined;
 };
+
+/**
+ * What plays once a queue runs out: the next queue, and what follows that.
+ * Resolves null when there's nothing more (or continuing was switched off).
+ */
+export type QueueContinuation = () => Promise<{
+  queue: PreviewTrack[];
+  next: QueueContinuation | null;
+} | null>;
 
 type PlayerState = {
   current: PreviewTrack | null;
@@ -35,8 +48,11 @@ type PlayerState = {
   isCurrent: (src: string | null | undefined) => boolean;
   /** Same question by name, for a track whose source isn't resolved yet. */
   isCurrentTrack: (artist: string | null | undefined, title: string) => boolean;
-  /** Play track *index* of *queue*, or pause/resume it if it's already loaded. */
-  toggle: (queue: PreviewTrack[], index: number) => void;
+  /**
+   * Play track *index* of *queue*, or pause/resume it if it's already loaded.
+   * *next* is what to play when the queue runs out (a list that keeps going).
+   */
+  toggle: (queue: PreviewTrack[], index: number, next?: QueueContinuation | null) => void;
   close: () => void;
 };
 
@@ -139,6 +155,14 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
   const [shuffle, setShuffle] = useState(storedShuffle);
   const [playing, setPlaying] = useState(false);
   const ref = useRef<AudioPlayer>(null);
+  // What follows the queue, when the list it came from keeps going. A ref: it
+  // is only ever called, never rendered -- `hasNext` is the rendered half.
+  const nextQueue = useRef<QueueContinuation | null>(null);
+  const [hasNext, setHasNext] = useState(false);
+  // Fetching the next queue. The token drops an answer that lands after the
+  // person has picked something else to play.
+  const [advancing, setAdvancing] = useState(false);
+  const advanceToken = useRef(0);
   // The level the player is set to, seeded from the last session. A ref, not
   // state: the prop only seeds the audio element, so re-rendering on every
   // slider movement would fight the person dragging it -- but the value has to
@@ -168,6 +192,10 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
   // reports the resolved absolute URL, while a track's src is a relative path.
   const currentKey = useRef<string | null>(null);
   currentKey.current = current ? `${current.artist ?? ""}|${current.title}` : null;
+  // The same song reached from another row of a list (an artist's top tracks
+  // behind two of their releases) is a new start there, not a pause here.
+  const currentGroup = useRef<string | null>(null);
+  currentGroup.current = current?.group ?? null;
 
   // Whatever the last track resolved to has to go with it: a queue of tracks
   // that each resolve on demand (a playlist, an artist's top tracks) would
@@ -181,28 +209,71 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
     setVideoId(null);
   }, []);
 
+  const load = useCallback(
+    (tracks: PreviewTrack[], index: number, then: QueueContinuation | null) => {
+      const walk = shuffle
+        ? shuffledOrder(tracks.length, index)
+        : Array.from({ length: tracks.length }, (_, i) => i);
+      setQueue(tracks);
+      setOrder(walk);
+      setPos(walk.indexOf(index));
+      forgetResolved();
+      nextQueue.current = then;
+      setHasNext(!!then);
+    },
+    [forgetResolved, shuffle],
+  );
+
   const toggle = useCallback(
-    (nextQueue: PreviewTrack[], nextIndex: number) => {
-      const track = nextQueue[nextIndex];
+    (tracks: PreviewTrack[], index: number, then?: QueueContinuation | null) => {
+      const track = tracks[index];
       if (!track) return;
       // Same track: this is a pause/resume, not a reload.
-      if (`${track.artist ?? ""}|${track.title}` === currentKey.current) {
+      if (
+        `${track.artist ?? ""}|${track.title}` === currentKey.current &&
+        (track.group ?? null) === currentGroup.current
+      ) {
         const el = ref.current?.audio?.current;
         if (!el) return;
         if (el.paused) el.play().catch(() => setPlaying(false));
         else el.pause();
         return;
       }
-      const next = shuffle
-        ? shuffledOrder(nextQueue.length, nextIndex)
-        : Array.from({ length: nextQueue.length }, (_, i) => i);
-      setQueue(nextQueue);
-      setOrder(next);
-      setPos(next.indexOf(nextIndex));
-      forgetResolved();
+      advanceToken.current += 1;
+      setAdvancing(false);
+      load(tracks, index, then ?? null);
     },
-    [forgetResolved, shuffle],
+    [load],
   );
+
+  // The queue ran out (or next was pressed on its last track): move on to
+  // whatever the list says comes after it, if anything does.
+  const advance = useCallback(() => {
+    const then = nextQueue.current;
+    if (!then) {
+      setPlaying(false);
+      return;
+    }
+    const token = ++advanceToken.current;
+    setAdvancing(true);
+    then()
+      .then((found) => {
+        if (token !== advanceToken.current) return;
+        if (!found || !found.queue.length) {
+          nextQueue.current = null;
+          setHasNext(false);
+          setPlaying(false);
+          return;
+        }
+        load(found.queue, 0, found.next);
+      })
+      .catch(() => {
+        if (token === advanceToken.current) setPlaying(false);
+      })
+      .finally(() => {
+        if (token === advanceToken.current) setAdvancing(false);
+      });
+  }, [load]);
 
   // Shuffling keeps the track that's playing and reorders what follows;
   // switching it off restores the queue's own order from where you are.
@@ -282,6 +353,10 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
 
   const close = useCallback(() => {
     ref.current?.audio?.current?.pause();
+    advanceToken.current += 1;
+    setAdvancing(false);
+    nextQueue.current = null;
+    setHasNext(false);
     setQueue([]);
     setOrder([]);
     setPos(0);
@@ -306,7 +381,7 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
     <PlayerContext.Provider value={state}>
       {children}
       {/* Keeps the page's last rows clear of the docked bar. */}
-      {current && <div aria-hidden className="h-24" />}
+      {current && <div aria-hidden className="h-28" />}
       {current && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 px-4 py-2 backdrop-blur">
           <div className="mx-auto flex max-w-[60rem] flex-wrap items-center gap-x-3 gap-y-1">
@@ -342,46 +417,57 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
                 ) : (
                   current.album
                 )}
-                {order.length > 1 ? ` · ${pos + 1} of ${order.length}` : ""}
-                {(() => {
-                  const note = current.note || resolvedNote;
-                  if (!note) return null;
-                  const href = current.noteUrl || resolvedNoteUrl;
-                  const icon = current.noteIcon || resolvedNoteIcon;
-                  // "from Navidrome", where Navidrome is the record on the
-                  // server it came from.
-                  return (
-                    <>
-                      {" · from "}
-                      {icon && (
-                        <ServiceIcon
-                          name={icon}
-                          size={13}
-                          className="mr-1 inline-block align-[-2px]"
-                        />
-                      )}
-                      {href ? (
-                        <a
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline decoration-dotted hover:decoration-solid"
-                          title={`Open ${note}`}
-                        >
-                          {note}
-                        </a>
-                      ) : (
-                        note
-                      )}
-                    </>
-                  );
-                })()}
               </p>
+              {(() => {
+                const note = current.note || resolvedNote;
+                const counted = order.length > 1;
+                if (!note && !counted) return null;
+                const href = current.noteUrl || resolvedNoteUrl;
+                const icon = current.noteIcon || resolvedNoteIcon;
+                // Where you are in the queue, then where the audio comes
+                // from: "3 of 10 · from Navidrome".
+                return (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {counted ? `${pos + 1} of ${order.length}` : ""}
+                    {counted && note ? " · " : ""}
+                    {note && (
+                      <>
+                        {"from "}
+                        {icon && (
+                          <ServiceIcon
+                            name={icon}
+                            size={13}
+                            className="mr-1 inline-block align-[-2px]"
+                          />
+                        )}
+                        {href ? (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline decoration-dotted hover:decoration-solid"
+                            title={`Open ${note}`}
+                          >
+                            {note}
+                          </a>
+                        ) : (
+                          note
+                        )}
+                      </>
+                    )}
+                  </p>
+                );
+              })()}
+              {current.queueNote && (
+                <p className="text-xs leading-snug text-amber-600 dark:text-amber-400">
+                  {current.queueNote}
+                </p>
+              )}
             </div>
-            {resolving && !src && !videoId && (
+            {((resolving && !src && !videoId) || advancing) && (
               <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <LuLoaderCircle aria-hidden className="animate-spin" />
-                finding audio
+                {advancing ? "finding the next one" : "finding audio"}
               </span>
             )}
             {/* No sample and no copy of our own: play the same video Last.fm
@@ -405,7 +491,7 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
               preload="none"
               layout="horizontal-reverse"
               showJumpControls={false}
-              showSkipControls={order.length > 1}
+              showSkipControls={order.length > 1 || hasNext}
               showFilledProgress
               customAdditionalControls={[]}
               customVolumeControls={[RHAP_UI.VOLUME]}
@@ -426,15 +512,20 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
               }}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
-              onEnded={() => (pos + 1 < order.length ? step(1) : setPlaying(false))}
+              onEnded={() => (pos + 1 < order.length ? step(1) : advance())}
               onPlayError={() => setPlaying(false)}
               onError={() => {
                 // No library copy and no sample: say so rather than sitting
                 // silently on a track that will never start.
                 setPlaying(false);
                 toast.error(`No audio available for ${current.title}.`);
+                // A list that keeps going shouldn't stall on one dead track.
+                if (hasNext) {
+                  if (pos + 1 < order.length) step(1);
+                  else advance();
+                }
               }}
-              onClickNext={() => step(1)}
+              onClickNext={() => (pos + 1 < order.length ? step(1) : advance())}
               onClickPrevious={() => step(-1)}
               className="smt-audio-player"
             />

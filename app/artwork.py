@@ -177,4 +177,7 @@ def content_type(path):
         return "image/gif"
     if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
         return "image/webp"
+    # Site favicons (the search-link icons).
+    if head.startswith(b"\x00\x00\x01\x00"):
+        return "image/x-icon"
     return "image/jpeg"

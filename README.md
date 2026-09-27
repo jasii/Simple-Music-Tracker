@@ -70,6 +70,14 @@ can be switched on or off:
 - **Similar artists**, gathered from Last.fm, and **Your Last.fm:** the
   artists you play most that aren't in your library.
 
+Each release shows the artist's genres as tags, and has a **play button**: it
+plays the release's tracks (your own copy if a library has it, else a preview),
+or the artist's top tracks when nothing on the record is out yet, and the player
+says so. Switch on **Continue to next artist** and it carries on down the list;
+the row playing is highlighted. The audio for every release from this week to a
+month out, on Discover and Upcoming, is **looked up in the background** ahead of
+time (Settings > Discovery > Pre-load audio), so play starts at once.
+
 ### Missing and grabbing
 
 - **Missing:** every release by your artists that no library owns, filtered by
@@ -107,6 +115,10 @@ can be switched on or off:
   webhook**, each subscribed to the events it wants: new release found, release
   day, release sent to the download client, Soulseek download finished or
   incomplete, and scan finished.
+- **Search links:** add your own search sites (a tracker, a record shop, a
+  wiki) with a URL like `https://example.com/torrents.php?searchstr={query}`;
+  each shows as an icon, the site's own favicon or one you choose, beside every
+  release's Last.fm / MusicBrainz / YouTube Music links.
 - **Backup and restore** as a ZIP file (settings, artist information and
   artwork, each optional). Older JSON backups still import.
 - **Maintenance:** control how long scraped data is kept, delete what belongs
@@ -133,11 +145,18 @@ Pull and run it directly:
 
 ```bash
 docker run -d -p 8080:8080 \
+  -e PUID=$(id -u) -e PGID=$(id -g) \
   -v "$(pwd)/data:/data" \
   -v "/path/to/your/music:/music:ro" \
   --name simple-music-tracker \
   ghcr.io/jasii/simple-music-tracker:latest
 ```
+
+`PUID` and `PGID` (default `1000`) set the user and group the app runs as, so
+the files it writes under `/data` belong to you on the host; `GUID` works as
+another name for `PGID`. On start the container hands anything under `/data`
+owned by someone else (an older image ran as root) over to that user. Set
+`PUID=0` to run as root as before.
 
 The music folder is optional: skip it if your library is on Navidrome or Plex,
 or if you'd rather add artists by hand.
@@ -200,6 +219,7 @@ Or with plain Docker:
 ```bash
 docker build -t simple-music-tracker .
 docker run -d -p 8080:8080 \
+  -e PUID=$(id -u) -e PGID=$(id -g) \
   -v "$(pwd)/data:/data" \
   -v "/path/to/your/music:/music:ro" \
   --name simple-music-tracker simple-music-tracker
@@ -260,6 +280,7 @@ configured under Settings. Adding a service means adding one file.
 | Download clients | slskd (Soulseek) |
 | Notifications | ntfy, Gotify, Discord |
 | Challenge solvers | FlareSolverr |
+| Search links | Your own sites (Settings > Downloads & quality) |
 
 ## Notifications and webhook
 
@@ -311,6 +332,10 @@ Everything the UI does goes through the JSON API. The most useful endpoints:
 | GET  | `/api/upcoming` | Upcoming releases. Param `window`: `day`, `week`, `next-week`, `month`, `all`. |
 | GET  | `/api/upcoming/releases` | Releases in a date range. Params `from`, `to` (`YYYY-MM-DD`). |
 | GET  | `/api/discover/releases` | Releases from every enabled discovery source. `?refresh=1` re-fetches. |
+| GET  | `/api/album/playable` | Where each track of a release plays from. Params `artist`, `title`, `mbid`. |
+| GET  | `/api/artist-top-tracks` | An artist's top tracks with audio, by name. Params `artist`, `limit` (1-10). |
+| GET  | `/api/prewarm/status` · POST `/api/prewarm` | Pre-load of this month's release audio: progress, or start it (`{"stop": true}` stops). |
+| GET  | `/api/search-links` | Your search sites, with their icons. |
 | GET  | `/api/album` | Tracklist, cover and what you own of one release. Params `artist`, `title`, `mbid`. |
 | GET  | `/api/library/missing` | Releases no library owns. Params `q`, `types`, `sort`, `limit`, `offset`. |
 | GET  | `/api/library/incomplete` | Albums owned with fewer tracks than a complete copy. |

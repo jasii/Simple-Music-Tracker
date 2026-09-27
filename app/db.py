@@ -298,6 +298,13 @@ DEFAULT_SETTINGS = {
     "lastfm_cookie": "",            # session cookie for scraping login-only Last.fm pages
     "discover_refresh_hours": "24", # how often the Discover scrape is refreshed
     "discover_enrich_workers": "8", # parallel threads enriching Discover releases (art/genres)
+    # Look up ahead of time what the month's Discover and Upcoming releases
+    # play from (see app/prewarm.py), so pressing play doesn't wait on it.
+    "prewarm_audio_enabled": "true",
+    "prewarm_audio_hours": "24",
+    # Your own search sites, shown beside every release's links: a JSON list
+    # of {"name", "url", "icon"} (see app/plugins/search).
+    "search_custom_sites": "[]",
     "discover_lastfm_enabled": "true",      # show the Last.fm source on Discover
     "discover_metacritic_enabled": "true",  # show the Metacritic source on Discover
     "discover_aoty_enabled": "true",        # albumoftheyear.org upcoming grid
@@ -920,7 +927,7 @@ _SIMILAR_GENRES_SQL = (
 )
 
 
-def _parse_genres(value):
+def parse_genres(value):
     """Genre list from either storage shape: a JSON array or a comma string."""
     if not value:
         return []
@@ -967,7 +974,7 @@ def similar_artist_rankings():
         "site": r["site"],
         "artist_id": r["artist_id"],
         "subscription": r["subscription"],
-        "genres": _parse_genres(r["genres"]),
+        "genres": parse_genres(r["genres"]),
         "sources": sorted((r["sources"] or "").split("")),
     } for r in rows]
 
