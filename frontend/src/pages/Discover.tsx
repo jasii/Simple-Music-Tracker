@@ -1,19 +1,43 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink } from "react-router-dom";
-import { LuBell, LuBellRing, LuEyeOff, LuLoaderCircle, LuPause, LuPlay, LuUserX } from "react-icons/lu";
+import {
+  LuBell,
+  LuBellRing,
+  LuBookmark,
+  LuBookmarkCheck,
+  LuDownload,
+  LuEyeOff,
+  LuLoaderCircle,
+  LuPause,
+  LuPlay,
+  LuTrash2,
+  LuUserX,
+} from "react-icons/lu";
 import { toast } from "sonner";
 import { api } from "../api";
 import { AlbumArt } from "../components/AlbumArt";
 import { ArtistLink, linkArtistNames, useOpenArtist } from "../components/ArtistLink";
-import {
-  usePreviewPlayer,
-  type PreviewTrack,
-  type QueueContinuation,
-} from "../components/PreviewPlayer";
-import type { DiscoverItem, DiscoverSourceStatus, DiscoverSourceTag, LastfmArtist, SimilarRanking } from "../types";
+import type {
+  DiscoverItem,
+  DiscoverSourceStatus,
+  DiscoverSourceTag,
+  LastfmArtist,
+  SimilarRanking,
+  WishlistItem,
+} from "../types";
 import { useNav } from "../nav";
 import { Agenda, Calendar, ViewToggle } from "../components/RelView";
+import { useAppEvent } from "../lib/events";
+import { useRowPlayer, type PlayRow, type Starting } from "../lib/listPlay";
+import {
+  continueOn,
+  heardKey,
+  heardReleases,
+  samplerSize,
+  setContinueOn,
+  setSamplerSize,
+} from "../lib/playPrefs";
 import {
   Combobox,
   ComboboxChip,
@@ -40,11 +64,12 @@ import {
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Separator } from "../components/ui/separator";
 import { Switch } from "../components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
-import { ReleaseIcons } from "../lib/format";
+import { ReleaseIcons, formatDate, relativeDays } from "../lib/format";
 
 // Relative "time since" for a unix-epoch-seconds timestamp (mirrors Settings).
 function fmtAgo(epoch?: number | null): string {
@@ -78,7 +103,7 @@ function itemSources(r: DiscoverItem): DiscoverSourceTag[] {
   return r.sources && r.sources.length ? r.sources : [{ key: r.source, label: r.source_label }];
 }
 
-function albumHref(r: DiscoverItem): string | null {
+function albumHref(r: { artist?: string | null; album?: string | null; mbid?: string | null; image?: string | null; normalized_date?: string | null; release_date?: string | null }): string | null {
   if (!r.artist || !r.album) return null;
   const qs = new URLSearchParams({ artist: r.artist, title: r.album, from: "discover" });
   if (r.mbid) qs.set("mbid", r.mbid);
@@ -90,107 +115,25 @@ function albumHref(r: DiscoverItem): string | null {
 
 type DiscoverCache = { sources: DiscoverSourceStatus[]; items: DiscoverItem[] };
 
-// --- Playing the feed ------------------------------------------------------
-// A row's play button plays the release's tracks; with "Continue to next
-// artist" on, the player walks on down the list when they run out. All of it
-// lives outside the component, because the player (and so the walk) outlives
-// the page: it keeps going after you navigate away.
-
-const CONTINUE_KEY = "discoverContinue";
-
-function continueOn(): boolean {
-  try { return localStorage.getItem(CONTINUE_KEY) === "true"; } catch { return false; }
-}
-
 // Which row a playing track came from, so that row can be marked.
-function playGroup(r: DiscoverItem): string {
+function playKey(r: { artist?: string | null; album?: string | null }): string {
   return `discover:${(r.artist || "").toLowerCase()}|${(r.album || "").toLowerCase()}`;
 }
 
-// A release nobody has opened is resolved while you wait (its tracklist, then
-// where each track plays from). The pre-load job has usually done this; if
-// not, this is how long to wait before playing whatever was found.
-const RESOLVE_WAIT_MS = 60_000;
-const TOP_TRACKS = 10;
-
-const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
-
-/**
- * What a row plays: the release's own tracks that have audio, else -- the
- * record isn't out yet -- the artist's top tracks, with a note saying so.
- */
-async function releaseQueue(
-  r: DiscoverItem,
-  onProgress?: (done: number, total: number) => void,
-): Promise<PreviewTrack[]> {
-  const artist = r.artist || "";
-  const album = r.album || "";
-  if (!artist) return [];
-  const group = playGroup(r);
-  if (album) {
-    const mbid = r.mbid || undefined;
-    const until = Date.now() + RESOLVE_WAIT_MS;
-    let found = await api.albumPlayable(artist, album, mbid);
-    while (!found.ready && found.running && Date.now() < until) {
-      onProgress?.(found.progress?.done ?? 0, found.progress?.total ?? 0);
-      await sleep(1500);
-      found = await api.albumPlayable(artist, album, mbid);
-    }
-    const titles = found.order?.length ? found.order : Object.keys(found.tracks || {});
-    // Only what streams through the player: a video embed can't say when
-    // it's finished, so it would stall the walk down the list.
-    const own: PreviewTrack[] = titles.flatMap((title) => {
-      const t = found.tracks?.[title];
-      if (!t?.stream) return [];
-      return [{
-        title,
-        artist,
-        artistId: r.artist_id,
-        album,
-        note: t.label ?? null,
-        noteUrl: t.source_url ?? null,
-        noteIcon: t.icon ?? null,
-        group,
-        src: t.stream,
-      }];
-    });
-    if (own.length) return own;
-  }
-  const top = await api.artistTopTracksByName(artist, TOP_TRACKS).catch(() => null);
-  const queueNote = album
-    ? `No music found for "${album}", so playing ${artist}'s top tracks`
-    : `Playing ${artist}'s top tracks`;
-  return (top?.tracks ?? [])
-    .filter((t) => t.stream)
-    .map((t) => ({
-      title: t.name,
-      artist,
-      artistId: r.artist_id,
-      album: t.album,
-      url: t.url,
-      note: t.library ?? null,
-      noteUrl: t.library_url ?? null,
-      noteIcon: t.library_icon ?? null,
-      group,
-      queueNote,
-      src: t.stream,
-    }));
-}
-
-/** After row *index* of *list*: the next row down that has anything to play. */
-function continueFrom(list: DiscoverItem[], index: number): QueueContinuation {
-  return async () => {
-    for (let i = index + 1; i < list.length; i += 1) {
-      // Read each time, so switching it off mid-album stops at the album's end.
-      if (!continueOn()) return null;
-      const queue = await releaseQueue(list[i]!).catch(() => []);
-      if (queue.length) return { queue, next: continueFrom(list, i) };
-    }
-    return null;
+function toPlayRow(r: DiscoverItem): PlayRow {
+  return {
+    key: playKey(r),
+    artist: r.artist || "",
+    album: r.album,
+    mbid: r.mbid,
+    artistId: r.artist_id,
+    image: r.image,
+    date: r.normalized_date,
   };
 }
 
-type Starting = { group: string; done: number; total: number };
+// Continue mode walks past what's already been listened to.
+const skipHeard = (row: PlayRow) => heardReleases.has(heardKey(row.artist, row.album));
 
 // Last.fm tags come as "hip.hop" and "rock_and_roll"; shown as words.
 function genreLabel(g: string): string {
@@ -198,6 +141,33 @@ function genreLabel(g: string): string {
 }
 function genreKey(g: string): string {
   return g.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+// The artist's genres and the release's own, as match keys.
+function itemGenreKeys(r: DiscoverItem): Set<string> {
+  return new Set([...(r.artist_genres ?? []), ...(r.genres ?? [])].map(genreKey).filter(Boolean));
+}
+
+function scoreClass(score: number): string {
+  if (score >= 75) return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400";
+  if (score >= 50) return "bg-amber-500/15 text-amber-700 dark:text-amber-400";
+  return "bg-red-500/15 text-red-700 dark:text-red-400";
+}
+
+type SortMode = "date" | "foryou" | "score";
+
+function stored(key: string, fallback: string): string {
+  try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
+}
+function storedList(key: string): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+function remember(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* not remembered */ }
 }
 
 /** Has this element come near the screen yet? Stays true once it has. */
@@ -232,38 +202,38 @@ export default function Discover() {
   const [sources, setSources] = useState<DiscoverSourceStatus[]>(cached?.sources ?? []);
   const [loaded, setLoaded] = useState(!!cached);
   const [loadingMsg, setLoadingMsg] = useState<string | null>(cached ? null : "Loading...");
-  const [hidden, setHidden] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem("discoverHidden") || "[]")); } catch { return new Set(); }
-  });
-  const [view, setView] = useState<"agenda" | "calendar">(() => {
-    try { return (localStorage.getItem("discoverView") as "agenda" | "calendar") || "agenda"; } catch { return "agenda"; }
-  });
-  const [tab, setTab] = useState<string>(() => {
-    try { return localStorage.getItem("discoverTab") || "releases"; } catch { return "releases"; }
-  });
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set(storedList("discoverHidden")));
+  const [view, setView] = useState<"agenda" | "calendar">(
+    () => stored("discoverView", "agenda") as "agenda" | "calendar",
+  );
+  const [tab, setTab] = useState<string>(() => stored("discoverTab", "releases"));
   // Agenda only: whether weeks before the current one are shown.
-  const [showPast, setShowPast] = useState<boolean>(() => {
-    try { return localStorage.getItem("discoverShowPast") !== "false"; } catch { return true; }
-  });
+  const [showPast, setShowPast] = useState<boolean>(() => stored("discoverShowPast", "true") !== "false");
   // Hide artists already followed. Artists followed *during this session* stay
   // visible (so the "Following" confirmation isn't yanked away mid-click);
   // they drop out on the next feed load.
-  const [hideFollowed, setHideFollowed] = useState<boolean>(() => {
-    try { return localStorage.getItem("discoverHideFollowed") === "true"; } catch { return false; }
-  });
+  const [hideFollowed, setHideFollowed] = useState<boolean>(() => stored("discoverHideFollowed", "false") === "true");
   // Hide releases the library already owns (album-level, not just the artist).
-  const [hideOwned, setHideOwned] = useState<boolean>(() => {
-    try { return localStorage.getItem("discoverHideOwned") === "true"; } catch { return false; }
-  });
+  const [hideOwned, setHideOwned] = useState<boolean>(() => stored("discoverHideOwned", "false") === "true");
+  // Hide releases already played. Like follows, ones heard this visit stay.
+  const [hideHeard, setHideHeard] = useState<boolean>(() => stored("discoverHideHeard", "false") === "true");
+  const [sort, setSort] = useState<SortMode>(() => stored("discoverSort", "date") as SortMode);
+  // Genre filter: show rows carrying any of `genres`, hide any carrying
+  // `hideGenres`. Labels as shown; matched loosely (see genreKey).
+  const [genres, setGenres] = useState<string[]>(() => storedList("discoverGenres"));
+  const [hideGenres, setHideGenres] = useState<string[]>(() => storedList("discoverHideGenres"));
   const [justFollowed, setJustFollowed] = useState<Set<string>>(new Set());
+  const [justHeard, setJustHeard] = useState<Set<string>>(new Set());
+  // "New since your last visit" is measured from this (null: first visit).
+  const [lastVisit, setLastVisit] = useState<number | null>(null);
   const pollTimer = useRef<ReturnType<typeof setTimeout>>();
   const sourceAnchor = useComboboxAnchor();
-  const player = usePreviewPlayer();
+  const genreAnchor = useComboboxAnchor();
+  const hideGenreAnchor = useComboboxAnchor();
+  const rowPlayer = useRowPlayer();
   // When a release's tracks run out, carry on with the next one down the list.
   const [continueNext, setContinueNext] = useState<boolean>(continueOn);
-  // The row whose audio is being looked up, and how far along that is.
-  const [starting, setStarting] = useState<Starting | null>(null);
-  const startToken = useRef(0);
+  const [sampler, setSampler] = useState<number>(samplerSize);
 
   const load = useCallback(
     (refresh?: string | false, poll = false) => {
@@ -278,6 +248,9 @@ export default function Discover() {
         .then((data) => {
           const srcs = data.sources || [];
           const its = data.items || [];
+          for (const it of its) {
+            if (it.heard && it.artist) heardReleases.add(heardKey(it.artist, it.album));
+          }
           setSources(srcs);
           setItems(its);
           setLoaded(true);
@@ -297,9 +270,44 @@ export default function Discover() {
   useEffect(() => {
     // Refresh in the background; stay silent when we already have cached data.
     load(false, !!cached);
+    // This look counts as a visit: what's new is measured from the one before.
+    api
+      .discoverVisit()
+      .then((r) => {
+        setLastVisit(r.last_visit);
+        qc.setQueryData(["discoverUnseen"], { count: 0 });
+      })
+      .catch(() => {});
     return () => { if (pollTimer.current) clearTimeout(pollTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // What the player (or another page) did to a release, reflected here.
+  const sameRelease = (it: DiscoverItem, artist: string, album?: string | null) =>
+    (it.artist || "").toLowerCase() === artist.toLowerCase() &&
+    (album == null || (it.album || "").toLowerCase() === album.toLowerCase());
+  useAppEvent("heard", (e) => {
+    const key = heardKey(e.artist, e.album);
+    if (e.heard) heardReleases.add(key); else heardReleases.delete(key);
+    if (e.heard) setJustHeard((prev) => new Set(prev).add(key));
+    setItems((prev) => prev.map((it) => (sameRelease(it, e.artist, e.album ?? "") ? { ...it, heard: e.heard } : it)));
+  });
+  useAppEvent("saved", (e) => {
+    setItems((prev) => prev.map((it) => (sameRelease(it, e.artist, e.album ?? "") ? { ...it, saved: e.saved } : it)));
+    qc.invalidateQueries({ queryKey: ["wishlist"] });
+  });
+  useAppEvent("followed", (e) => {
+    setFollowing(e.artist, e.following);
+    if (e.following) setJustFollowed((prev) => new Set(prev).add(e.artist.toLowerCase()));
+  });
+  useAppEvent("ignored", (e) => {
+    setItems((prev) => prev.filter((it) => !sameRelease(it, e.artist, e.album ?? null)));
+    qc.invalidateQueries({ queryKey: ["discoverIgnores"] });
+  });
+  useAppEvent("unignored", () => {
+    load(false, true);
+    qc.invalidateQueries({ queryKey: ["discoverIgnores"] });
+  });
 
   // The source filter is a shadcn multi-select combobox where selected = visible.
   // Map the chosen labels back onto the `hidden` set (keyed by source key),
@@ -313,33 +321,58 @@ export default function Discover() {
         if (keep.has(s.label)) next.delete(s.key);
         else next.add(s.key);
       }
-      try { localStorage.setItem("discoverHidden", JSON.stringify(Array.from(next))); } catch {}
+      remember("discoverHidden", JSON.stringify(Array.from(next)));
       return next;
     });
   }
   function changeView(v: "agenda" | "calendar") {
     setView(v);
-    try { localStorage.setItem("discoverView", v); } catch {}
+    remember("discoverView", v);
   }
   function changeTab(v: string) {
     setTab(v);
-    try { localStorage.setItem("discoverTab", v); } catch {}
+    remember("discoverTab", v);
   }
   function changeShowPast(v: boolean) {
     setShowPast(v);
-    try { localStorage.setItem("discoverShowPast", String(v)); } catch {}
+    remember("discoverShowPast", String(v));
   }
   function changeHideFollowed(v: boolean) {
     setHideFollowed(v);
-    try { localStorage.setItem("discoverHideFollowed", String(v)); } catch {}
+    remember("discoverHideFollowed", String(v));
   }
   function changeHideOwned(v: boolean) {
     setHideOwned(v);
-    try { localStorage.setItem("discoverHideOwned", String(v)); } catch {}
+    remember("discoverHideOwned", String(v));
+  }
+  function changeHideHeard(v: boolean) {
+    setHideHeard(v);
+    remember("discoverHideHeard", String(v));
+  }
+  function changeSort(v: SortMode) {
+    setSort(v);
+    remember("discoverSort", v);
+  }
+  function changeGenres(v: string[]) {
+    setGenres(v);
+    remember("discoverGenres", JSON.stringify(v));
+  }
+  function changeHideGenres(v: string[]) {
+    setHideGenres(v);
+    remember("discoverHideGenres", JSON.stringify(v));
+  }
+  function addGenre(g: string) {
+    const label = genreLabel(g);
+    if (!genres.some((x) => genreKey(x) === genreKey(label))) changeGenres([...genres, label]);
   }
   function changeContinue(v: boolean) {
     setContinueNext(v);
-    try { localStorage.setItem(CONTINUE_KEY, String(v)); } catch {}
+    setContinueOn(v);
+  }
+  function changeSampler(v: string) {
+    const n = Number(v) || 0;
+    setSampler(n);
+    setSamplerSize(n);
   }
 
   function setFollowing(artist: string, following: boolean) {
@@ -378,6 +411,30 @@ export default function Discover() {
       qc.invalidateQueries({ queryKey: ["discoverIgnores"] });
     });
   }
+  // Save for later, or take it off the list again.
+  function toggleSaved(r: DiscoverItem) {
+    if (!r.artist || !r.album) return Promise.resolve();
+    const artist = r.artist;
+    const album = r.album;
+    const call = r.saved
+      ? api.wishlistRemove(artist, album)
+      : api.wishlistAdd({ artist, album, mbid: r.mbid, release_date: r.normalized_date, image: r.image });
+    return call
+      .then(() => {
+        setItems((prev) => prev.map((it) => (sameRelease(it, artist, album) ? { ...it, saved: !r.saved } : it)));
+        qc.invalidateQueries({ queryKey: ["wishlist"] });
+        if (!r.saved) toast.success(`Saved "${album}" for later`);
+      })
+      .catch(() => toast.error("Could not update the saved list."));
+  }
+  function unheard(r: DiscoverItem) {
+    if (!r.artist) return;
+    const artist = r.artist;
+    api.markHeard(artist, r.album, false).then(() => {
+      heardReleases.delete(heardKey(artist, r.album));
+      setItems((prev) => prev.map((it) => (sameRelease(it, artist, r.album ?? "") ? { ...it, heard: false } : it)));
+    });
+  }
 
   const configuredAny = sources.some((s) => s.configured);
   const configuredSources = useMemo(() => sources.filter((s) => s.configured), [sources]);
@@ -386,7 +443,8 @@ export default function Discover() {
     () => configuredSources.filter((s) => !hidden.has(s.key)).map((s) => s.label),
     [configuredSources, hidden],
   );
-  const visible = useMemo(
+  // Everything but the genre filter: what the genre options are counted over.
+  const unfiltered = useMemo(
     () =>
       items
         .filter((r) => itemSources(r).some((s) => !hidden.has(s.key as string)))
@@ -396,9 +454,39 @@ export default function Discover() {
             !r.following ||
             justFollowed.has((r.artist || "").toLowerCase()),
         )
-        .filter((r) => !hideOwned || !r.owned),
-    [items, hidden, hideFollowed, hideOwned, justFollowed],
+        .filter((r) => !hideOwned || !r.owned)
+        .filter((r) => !hideHeard || !r.heard || justHeard.has(heardKey(r.artist || "", r.album))),
+    [items, hidden, hideFollowed, hideOwned, hideHeard, justFollowed, justHeard],
   );
+  // Genre -> how many rows carry it, most common first.
+  const genreOptions = useMemo(() => {
+    const counts = new Map<string, { label: string; n: number }>();
+    for (const r of unfiltered) {
+      const seen = new Set<string>();
+      for (const g of [...(r.artist_genres ?? []), ...(r.genres ?? [])]) {
+        const k = genreKey(g);
+        if (!k || seen.has(k)) continue;
+        seen.add(k);
+        const entry = counts.get(k) ?? { label: genreLabel(g).toLowerCase(), n: 0 };
+        entry.n += 1;
+        counts.set(k, entry);
+      }
+    }
+    return Array.from(counts.values()).sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+  }, [unfiltered]);
+  const genreLabels = useMemo(() => genreOptions.map((g) => g.label), [genreOptions]);
+  const genreCount = useMemo(() => new Map(genreOptions.map((g) => [g.label, g.n])), [genreOptions]);
+  const untagged = useMemo(() => unfiltered.filter((r) => itemGenreKeys(r).size === 0).length, [unfiltered]);
+  const visible = useMemo(() => {
+    const want = genres.map(genreKey);
+    const avoid = hideGenres.map(genreKey);
+    if (!want.length && !avoid.length) return unfiltered;
+    return unfiltered.filter((r) => {
+      const have = itemGenreKeys(r);
+      if (avoid.some((g) => have.has(g))) return false;
+      return !want.length || want.some((g) => have.has(g));
+    });
+  }, [unfiltered, genres, hideGenres]);
   // Agenda list with past weeks optionally dropped. Undated ("TBA") items stay;
   // the cutoff is the start of the current week, matching the Agenda buckets.
   const agendaItems = useMemo(() => {
@@ -410,50 +498,56 @@ export default function Discover() {
       (r) => !r.normalized_date || new Date(r.normalized_date + "T00:00:00") >= cutoff,
     );
   }, [visible, showPast]);
+  // The list in the order it's shown: by date (the agenda's order), or ranked.
+  const listed = useMemo(() => {
+    if (sort === "date") return agendaItems;
+    const byDate = (a: DiscoverItem, b: DiscoverItem) =>
+      (a.normalized_date || "9999").localeCompare(b.normalized_date || "9999");
+    return [...agendaItems].sort((a, b) =>
+      sort === "score"
+        ? (b.score ?? -1) - (a.score ?? -1) || (b.for_you ?? 0) - (a.for_you ?? 0) || byDate(a, b)
+        : (b.for_you ?? 0) - (a.for_you ?? 0) || byDate(a, b),
+    );
+  }, [agendaItems, sort]);
+  const playRows = useMemo(() => listed.filter((r) => r.artist).map(toPlayRow), [listed]);
+
+  // Genre lookup for the rows that have none, when a genre filter is in use.
+  const filtering = genres.length > 0 || hideGenres.length > 0;
+  const { data: enrich } = useQuery({
+    queryKey: ["similarEnrich"],
+    queryFn: () => api.similarEnrichStatus(),
+    enabled: filtering,
+    refetchInterval: (query) => (query.state.data?.running ? 3000 : false),
+  });
+  const enrichWasRunning = useRef(false);
+  useEffect(() => {
+    // A finished lookup: reload so the new tags reach the rows.
+    if (enrichWasRunning.current && enrich && !enrich.running) load(false, true);
+    enrichWasRunning.current = !!enrich?.running;
+  }, [enrich, load]);
+  function lookUpGenres() {
+    api
+      .discoverGenres()
+      .then((state) => {
+        qc.setQueryData(["similarEnrich"], state);
+        if (!state.started && !state.running) toast.info("Every artist here already has genre tags.");
+      })
+      .catch(() => toast.error("Could not start the genre lookup."));
+  }
 
   const noSources = loaded && !configuredAny;
-
-  // Play a row: pause/resume when it's the one playing, else look up what it
-  // plays from and start, handing the player the rest of the list to go on to.
-  function playRow(r: DiscoverItem) {
-    const group = playGroup(r);
-    if (player.current && player.current.group === group) {
-      player.toggle([player.current], 0);
-      return;
-    }
-    const token = ++startToken.current;
-    setStarting({ group, done: 0, total: 0 });
-    // The list as it's shown right now, top to bottom.
-    const list = agendaItems.filter((it) => it.artist);
-    const index = list.indexOf(r);
-    releaseQueue(r, (done, total) => {
-      if (token === startToken.current) setStarting({ group, done, total });
-    })
-      .then((queue) => {
-        if (token !== startToken.current) return;
-        if (!queue.length) {
-          toast.error(`Nothing to play for ${r.artist}${r.album ? ` - ${r.album}` : ""}.`);
-          return;
-        }
-        player.toggle(queue, 0, continueFrom(list, index));
-      })
-      .catch(() => {
-        if (token === startToken.current) toast.error(`Could not look up ${r.album || r.artist}.`);
-      })
-      .finally(() => {
-        if (token === startToken.current) setStarting(null);
-      });
-  }
 
   // Live status line: counts reflect the source checkboxes (client-side filter),
   // so toggling Last.fm / Metacritic updates the number immediately.
   const shownCount = sources.filter((s) => s.configured && !s.error && !hidden.has(s.key)).length;
   const busy = sources.filter((s) => s.refreshing);
   const errs = sources.filter((s) => s.error);
+  const newCount = lastVisit ? visible.filter((r) => (r.first_seen ?? 0) > lastVisit).length : 0;
   const statusLine =
     shownCount === 0
       ? "" // empty state below carries the (linked) message instead
       : `${visible.length} releases from ${shownCount} ${shownCount === 1 ? "source" : "sources"}` +
+        (newCount ? ` · ${newCount} new since your last visit` : "") +
         (busy.length ? ` · refreshing ${busy.map((s) => s.label).join(", ")}...` : "") +
         (errs.length ? ` · ${errs.map((s) => `${s.label}: ${s.error}`).join("; ")}` : "");
 
@@ -464,6 +558,37 @@ export default function Discover() {
     </p>
   );
 
+  const { data: saved } = useQuery({
+    queryKey: ["wishlist"],
+    queryFn: () => api.wishlist(),
+    staleTime: 60_000,
+  });
+
+  const renderRow = (r: DiscoverItem, k: number, ranked = false) => {
+    const key = playKey(r);
+    return (
+      <AgendaRow
+        key={k}
+        r={r}
+        hidden={hidden}
+        onFollow={follow}
+        onUnfollow={unfollow}
+        onNotify={setNotify}
+        onIgnore={ignore}
+        onSave={toggleSaved}
+        onUnheard={unheard}
+        onGenre={addGenre}
+        onPlay={(row) => rowPlayer.play(toPlayRow(row), playRows, skipHeard)}
+        starting={rowPlayer.starting?.key === key ? rowPlayer.starting : null}
+        active={rowPlayer.activeKey === key}
+        playing={rowPlayer.activeKey === key && rowPlayer.playing}
+        isNew={!!lastVisit && (r.first_seen ?? 0) > lastVisit}
+        showDate={ranked}
+        showReasons={sort === "foryou"}
+      />
+    );
+  };
+
   return (
     <div>
       <Tabs value={tab} onValueChange={changeTab}>
@@ -471,6 +596,9 @@ export default function Discover() {
           <h1 className="text-2xl font-bold">Discover</h1>
           <TabsList>
             <TabsTrigger value="releases">New Releases</TabsTrigger>
+            <TabsTrigger value="saved">
+              Saved{saved?.items.length ? ` (${saved.items.length})` : ""}
+            </TabsTrigger>
             <TabsTrigger value="similar">Similar Artists</TabsTrigger>
             <TabsTrigger value="scrobbles">Your Last.fm</TabsTrigger>
           </TabsList>
@@ -480,96 +608,165 @@ export default function Discover() {
         )}
 
         <TabsContent value="releases" className="mt-1">
+          <div className="mb-2 flex flex-wrap items-center justify-end gap-2 text-sm">
+            <ViewToggle view={view} onChange={changeView} />
+            {view === "agenda" && (
+              <Select value={sort} onValueChange={(v) => changeSort(v as SortMode)}>
+                <SelectTrigger size="sm" className="w-auto" aria-label="Sort">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="date">By date</SelectItem>
+                  <SelectItem value="foryou">For you</SelectItem>
+                  <SelectItem value="score">Critic score</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-2">
+              <Switch id="discover-hide-followed" checked={hideFollowed} onCheckedChange={changeHideFollowed} />
+              <Label htmlFor="discover-hide-followed">Hide followed</Label>
+            </div>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-2">
+              <Switch id="discover-hide-owned" checked={hideOwned} onCheckedChange={changeHideOwned} />
+              <Label htmlFor="discover-hide-owned">Hide owned</Label>
+            </div>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-2">
+              <Switch id="discover-hide-heard" checked={hideHeard} onCheckedChange={changeHideHeard} />
+              <Label htmlFor="discover-hide-heard">Hide heard</Label>
+            </div>
+            {view === "agenda" && (
+              <>
+                <Separator orientation="vertical" className="h-6" />
+                <div className="flex items-center gap-2">
+                  <Switch id="discover-show-past" checked={showPast} onCheckedChange={changeShowPast} />
+                  <Label htmlFor="discover-show-past">Past weeks</Label>
+                </div>
+              </>
+            )}
+            <Separator orientation="vertical" className="h-6" />
+            {configuredSources.length > 0 && (
+              <Combobox
+                multiple
+                autoHighlight
+                items={sourceLabels}
+                value={selectedSources}
+                onValueChange={changeVisibleSources}
+              >
+                <ComboboxChips ref={sourceAnchor} className="min-w-[180px]">
+                  <ComboboxValue>
+                    {(values: string[]) => (
+                      <>
+                        {values.map((v) => {
+                          const s = configuredSources.find((x) => x.label === v);
+                          return (
+                            <ComboboxChip key={v}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>{v}</span>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">
+                                  {s ? (
+                                    <>
+                                      Last sync: {s.refreshing ? "syncing…" : fmtAgo(s.fetched_at)}
+                                      {" · "}
+                                      {s.count} {s.count === 1 ? "result" : "results"}
+                                      {s.error ? ` · ${s.error}` : ""}
+                                    </>
+                                  ) : (
+                                    v
+                                  )}
+                                </TooltipContent>
+                              </Tooltip>
+                            </ComboboxChip>
+                          );
+                        })}
+                        <ComboboxChipsInput placeholder={values.length ? "" : "Sources"} />
+                      </>
+                    )}
+                  </ComboboxValue>
+                </ComboboxChips>
+                <ComboboxContent anchor={sourceAnchor}>
+                  <ComboboxEmpty>No sources.</ComboboxEmpty>
+                  <ComboboxList>
+                    {(item: string) => (
+                      <ComboboxItem key={item} value={item}>
+                        {item}
+                        {configuredSources.find((s) => s.label === item)?.error ? " (error)" : ""}
+                      </ComboboxItem>
+                    )}
+                  </ComboboxList>
+                </ComboboxContent>
+              </Combobox>
+            )}
+          </div>
           <div className="mb-3 flex flex-wrap items-center justify-end gap-2 text-sm">
-              <ViewToggle view={view} onChange={changeView} />
-              <Separator orientation="vertical" className="h-6" />
-              <div className="flex items-center gap-2">
-                <Switch id="discover-hide-followed" checked={hideFollowed} onCheckedChange={changeHideFollowed} />
-                <Label htmlFor="discover-hide-followed">Hide followed</Label>
-              </div>
-              <Separator orientation="vertical" className="h-6" />
-              <div className="flex items-center gap-2">
-                <Switch id="discover-hide-owned" checked={hideOwned} onCheckedChange={changeHideOwned} />
-                <Label htmlFor="discover-hide-owned">Hide owned</Label>
-              </div>
-              {view === "agenda" && (
-                <>
-                  <Separator orientation="vertical" className="h-6" />
-                  <div className="flex items-center gap-2">
-                    <Switch id="discover-show-past" checked={showPast} onCheckedChange={changeShowPast} />
-                    <Label htmlFor="discover-show-past">Past weeks</Label>
-                  </div>
-                  <Separator orientation="vertical" className="h-6" />
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="flex items-center gap-2">
-                        <Switch id="discover-continue" checked={continueNext} onCheckedChange={changeContinue} />
-                        <Label htmlFor="discover-continue">Continue to next artist</Label>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      When a release's tracks finish playing, go on to the next one down the list.
-                    </TooltipContent>
-                  </Tooltip>
-                </>
-              )}
-              <Separator orientation="vertical" className="h-6" />
-              {configuredSources.length > 0 && (
-                <Combobox
-                  multiple
-                  autoHighlight
-                  items={sourceLabels}
-                  value={selectedSources}
-                  onValueChange={changeVisibleSources}
-                >
-                  <ComboboxChips ref={sourceAnchor} className="min-w-[180px]">
-                    <ComboboxValue>
-                      {(values: string[]) => (
-                        <>
-                          {values.map((v) => {
-                            const s = configuredSources.find((x) => x.label === v);
-                            return (
-                              <ComboboxChip key={v}>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <span>{v}</span>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="bottom">
-                                    {s ? (
-                                      <>
-                                        Last sync: {s.refreshing ? "syncing…" : fmtAgo(s.fetched_at)}
-                                        {" · "}
-                                        {s.count} {s.count === 1 ? "result" : "results"}
-                                        {s.error ? ` · ${s.error}` : ""}
-                                      </>
-                                    ) : (
-                                      v
-                                    )}
-                                  </TooltipContent>
-                                </Tooltip>
-                              </ComboboxChip>
-                            );
-                          })}
-                          <ComboboxChipsInput placeholder={values.length ? "" : "Sources"} />
-                        </>
-                      )}
-                    </ComboboxValue>
-                  </ComboboxChips>
-                  <ComboboxContent anchor={sourceAnchor}>
-                    <ComboboxEmpty>No sources.</ComboboxEmpty>
-                    <ComboboxList>
-                      {(item: string) => (
-                        <ComboboxItem key={item} value={item}>
-                          {item}
-                          {configuredSources.find((s) => s.label === item)?.error ? " (error)" : ""}
-                        </ComboboxItem>
-                      )}
-                    </ComboboxList>
-                  </ComboboxContent>
-                </Combobox>
-              )}
+            <GenrePicker
+              anchor={genreAnchor}
+              options={genreLabels}
+              counts={genreCount}
+              value={genres}
+              onChange={changeGenres}
+              placeholder="Genres"
+            />
+            <GenrePicker
+              anchor={hideGenreAnchor}
+              options={genreLabels}
+              counts={genreCount}
+              value={hideGenres}
+              onChange={changeHideGenres}
+              placeholder="Hide genres"
+            />
+            {filtering && (
+              <Button size="xs" variant="ghost" onClick={() => { changeGenres([]); changeHideGenres([]); }}>
+                Clear genres
+              </Button>
+            )}
+            {view === "agenda" && (
+              <>
+                <Separator orientation="vertical" className="h-6" />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center gap-2">
+                      <Switch id="discover-continue" checked={continueNext} onCheckedChange={changeContinue} />
+                      <Label htmlFor="discover-continue">Continue to next artist</Label>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    When a release's tracks finish playing, go on to the next one down the list,
+                    past anything you've already heard.
+                  </TooltipContent>
+                </Tooltip>
+                <Select value={String(sampler)} onValueChange={changeSampler}>
+                  <SelectTrigger size="sm" className="w-auto" aria-label="Tracks per release">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Every track</SelectItem>
+                    <SelectItem value="1">1 track per release</SelectItem>
+                    <SelectItem value="2">2 tracks per release</SelectItem>
+                    <SelectItem value="3">3 tracks per release</SelectItem>
+                    <SelectItem value="5">5 tracks per release</SelectItem>
+                  </SelectContent>
+                </Select>
+              </>
+            )}
           </div>
           {statusLine && <p className="mb-3 text-muted-foreground">{statusLine}</p>}
+          {filtering && untagged > 0 && (
+            <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span>
+                {enrich?.running
+                  ? `Looking up genres: ${enrich.done}/${enrich.total}${enrich.current ? ` - ${enrich.current}` : ""}`
+                  : `${untagged} release${untagged === 1 ? " has" : "s have"} no genre tags yet${genres.length ? " and are hidden by the genre filter" : ""}.`}
+              </span>
+              {!enrich?.running && (
+                <Button size="xs" variant="outline" onClick={lookUpGenres}>Look up genres</Button>
+              )}
+            </p>
+          )}
           {loadingMsg ? (
             <p className="text-muted-foreground">{loadingMsg}</p>
           ) : noSources || shownCount === 0 ? (
@@ -584,25 +781,17 @@ export default function Discover() {
               }
               renderEvent={(r, k) => <CalEvent key={k} r={r} hidden={hidden} />}
             />
+          ) : sort === "date" ? (
+            <Agenda items={agendaItems} renderItem={(r, k) => renderRow(r, k)} emptyMsg={emptyState} />
+          ) : listed.length ? (
+            <div className="flex flex-col">{listed.map((r, k) => renderRow(r, k, true))}</div>
           ) : (
-            <Agenda
-              items={agendaItems}
-              renderItem={(r, k) => (
-                <AgendaRow
-                  key={k}
-                  r={r}
-                  hidden={hidden}
-                  onFollow={follow}
-                  onUnfollow={unfollow}
-                  onNotify={setNotify}
-                  onIgnore={ignore}
-                  onPlay={playRow}
-                  starting={starting && starting.group === playGroup(r) ? starting : null}
-                />
-              )}
-              emptyMsg={emptyState}
-            />
+            emptyState
           )}
+        </TabsContent>
+
+        <TabsContent value="saved" className="mt-3">
+          <SavedReleases items={saved?.items} autograb={!!saved?.autograb} />
         </TabsContent>
 
         <TabsContent value="similar" className="mt-3">
@@ -617,6 +806,53 @@ export default function Discover() {
   );
 }
 
+// A multi-select of genre names, most common first, with how many rows carry each.
+function GenrePicker({
+  anchor,
+  options,
+  counts,
+  value,
+  onChange,
+  placeholder,
+}: {
+  anchor: ReturnType<typeof useComboboxAnchor>;
+  options: string[];
+  counts: Map<string, number>;
+  value: string[];
+  onChange: (v: string[]) => void;
+  placeholder: string;
+}) {
+  // Chosen genres stay pickable even when no row carries them right now.
+  const all = useMemo(() => Array.from(new Set([...value, ...options])), [value, options]);
+  return (
+    <Combobox multiple autoHighlight items={all} value={value} onValueChange={onChange}>
+      <ComboboxChips ref={anchor} className="min-w-[160px]">
+        <ComboboxValue>
+          {(values: string[]) => (
+            <>
+              {values.map((v) => (
+                <ComboboxChip key={v} className="capitalize">{v}</ComboboxChip>
+              ))}
+              <ComboboxChipsInput placeholder={values.length ? "" : placeholder} />
+            </>
+          )}
+        </ComboboxValue>
+      </ComboboxChips>
+      <ComboboxContent anchor={anchor}>
+        <ComboboxEmpty>No genres.</ComboboxEmpty>
+        <ComboboxList>
+          {(item: string) => (
+            <ComboboxItem key={item} value={item}>
+              <span className="capitalize">{item}</span>
+              <span className="ml-2 text-muted-foreground">{counts.get(item) ?? 0}</span>
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
+  );
+}
+
 function AgendaRow({
   r,
   hidden,
@@ -624,8 +860,16 @@ function AgendaRow({
   onUnfollow,
   onNotify,
   onIgnore,
+  onSave,
+  onUnheard,
+  onGenre,
   onPlay,
   starting,
+  active,
+  playing,
+  isNew,
+  showDate,
+  showReasons,
 }: {
   r: DiscoverItem;
   hidden: Set<string>;
@@ -633,12 +877,18 @@ function AgendaRow({
   onUnfollow: (a: string) => Promise<void>;
   onNotify: (a: string, on: boolean) => Promise<void>;
   onIgnore: (a: string, album?: string) => Promise<void>;
+  onSave: (r: DiscoverItem) => Promise<unknown>;
+  onUnheard: (r: DiscoverItem) => void;
+  onGenre: (g: string) => void;
   onPlay: (r: DiscoverItem) => void;
   starting: Starting | null;
+  active: boolean;
+  playing: boolean;
+  isNew: boolean;
+  showDate: boolean;
+  showReasons: boolean;
 }) {
   const href = albumHref(r);
-  const player = usePreviewPlayer();
-  const active = !!player.current && player.current.group === playGroup(r);
   const [rowRef, seen] = useSeen<HTMLDivElement>();
   // Walking down the list moves the mark out of view: follow it. Only when
   // it arrives, not when the page opens on a row that was already playing.
@@ -675,6 +925,7 @@ function AgendaRow({
   const [notifyOn, setNotifyOn] = useState(!!r.notify);
   const [bellBusy, setBellBusy] = useState(false);
   const [hideBusy, setHideBusy] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
   // A feed reload can change it under us (following elsewhere, a refresh).
   useEffect(() => { setNotifyOn(!!r.notify); }, [r.notify]);
   function toggleFollow() {
@@ -694,7 +945,12 @@ function AgendaRow({
     setHideBusy(true);
     onIgnore(r.artist, album).finally(() => setHideBusy(false));
   }
-  const playLabel = active && player.playing ? "Pause" : active ? "Resume" : "Play this release";
+  function toggleSave() {
+    setSaveBusy(true);
+    onSave(r).finally(() => setSaveBusy(false));
+  }
+  const playLabel = active && playing ? "Pause" : active ? "Resume" : "Play this release";
+  const reasons = showReasons ? (r.reasons ?? []).slice(0, 3) : [];
   return (
     <div
       ref={rowRef}
@@ -703,7 +959,7 @@ function AgendaRow({
         (active ? " bg-primary/10 ring-1 ring-primary/40" : "")
       }
     >
-      <div className="relative flex-none">
+      <div className={"relative flex-none" + (r.heard && !active ? " opacity-60" : "")}>
         <AlbumArt src={r.image} boxSize="150px" rounded="md" />
         {r.artist && (
           <Button
@@ -717,7 +973,7 @@ function AgendaRow({
           >
             {starting ? (
               <LuLoaderCircle className="animate-spin" />
-            ) : active && player.playing ? (
+            ) : active && playing ? (
               <LuPause />
             ) : (
               <LuPlay />
@@ -725,14 +981,31 @@ function AgendaRow({
           </Button>
         )}
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="font-semibold">
+      <div className={"min-w-0 flex-1" + (r.heard && !active ? " opacity-75" : "")}>
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold">
           {href ? (
             <RouterLink to={href} className="hover:underline">{r.album}</RouterLink>
           ) : r.album_url ? (
             <a href={r.album_url} target="_blank" rel="noopener" className="hover:underline">{r.album}</a>
           ) : (
             r.album
+          )}
+          {isNew && (
+            <Badge className="bg-sky-500/15 font-medium text-sky-700 dark:text-sky-400">New</Badge>
+          )}
+          {r.heard && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  asChild
+                  variant="outline"
+                  className="cursor-pointer font-medium text-muted-foreground"
+                >
+                  <button type="button" onClick={() => onUnheard(r)}>Heard</button>
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>You've played this. Click to mark it unheard.</TooltipContent>
+            </Tooltip>
           )}
         </p>
         <div>
@@ -741,6 +1014,17 @@ function AgendaRow({
               page is linked from there. */}
           <ArtistLink name={r.artist} artistId={r.artist_id} />
         </div>
+        {showDate && (
+          <p className="text-sm text-muted-foreground">
+            {formatDate(r.normalized_date)}
+            {r.normalized_date
+              ? ` · ${relativeDays(Math.round((new Date(r.normalized_date + "T00:00:00").getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000))}`
+              : ""}
+          </p>
+        )}
+        {reasons.length > 0 && (
+          <p className="text-sm text-primary/80">{reasons.join(" · ")}</p>
+        )}
         {r.context && (
           <p className="text-sm text-muted-foreground">
             {linkArtistNames(r.context, r.context_artists)}
@@ -748,20 +1032,32 @@ function AgendaRow({
         )}
         {(artistGenres.length > 0 || releaseGenres.length > 0) && (
           <div className="mt-1 flex flex-wrap gap-1.5">
-            {/* The artist's genres filled, the release's own outlined. */}
+            {/* The artist's genres filled, the release's own outlined. Click
+                one to filter the list to it. */}
             {artistGenres.map((g) => (
-              <Badge key={"a:" + g} variant="secondary" className="capitalize" title={`${r.artist}: ${g}`}>
-                {g}
+              <Badge key={"a:" + g} asChild variant="secondary" className="cursor-pointer capitalize">
+                <button type="button" title={`${r.artist}: ${g}. Click to show only ${g}.`} onClick={() => onGenre(g)}>
+                  {g}
+                </button>
               </Badge>
             ))}
             {releaseGenres.map((g) => (
-              <Badge key={"r:" + g} variant="outline" className="capitalize text-muted-foreground" title={`This release: ${g}`}>
-                {g}
+              <Badge key={"r:" + g} asChild variant="outline" className="cursor-pointer capitalize text-muted-foreground">
+                <button type="button" title={`This release: ${g}. Click to show only ${g}.`} onClick={() => onGenre(g)}>
+                  {g}
+                </button>
               </Badge>
             ))}
           </div>
         )}
         <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {r.score != null && (
+            <Badge asChild variant="secondary" className={scoreClass(r.score)}>
+              <a href={r.score_url || undefined} target="_blank" rel="noopener noreferrer" title="Metacritic critic score">
+                Metascore {r.score}
+              </a>
+            </Badge>
+          )}
           {itemSources(r).filter((s) => !hidden.has(s.key as string)).map((s) => (
             <Badge key={s.key} variant="secondary" className={srcBadge(s.key as string)}>{s.label}</Badge>
           ))}
@@ -799,6 +1095,27 @@ function AgendaRow({
               </TooltipContent>
             </Tooltip>
           )}
+          {r.artist && r.album && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label={r.saved ? "Saved for later" : "Save for later"}
+                  aria-pressed={!!r.saved}
+                  size="icon-xs"
+                  variant={r.saved ? "default" : "ghost"}
+                  disabled={saveBusy}
+                  onClick={toggleSave}
+                >
+                  {r.saved ? <LuBookmarkCheck /> : <LuBookmark />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {r.saved
+                  ? "Saved for later (see the Saved tab). Click to take it off."
+                  : "Save for later: you'll be told on its release day."}
+              </TooltipContent>
+            </Tooltip>
+          )}
           {r.artist && (
             <>
               {r.album && (
@@ -833,6 +1150,126 @@ function AgendaRow({
           <ReleaseIcons artist={r.artist} album={r.album} mbid={r.mbid} />
         </div>
       )}
+    </div>
+  );
+}
+
+// The saved-for-later list: soonest first, each announced on its release day
+// (and grabbed then, when that's switched on).
+function SavedReleases({ items, autograb }: { items?: WishlistItem[]; autograb: boolean }) {
+  const qc = useQueryClient();
+  const rowPlayer = useRowPlayer();
+  const { data: downloaderData } = useQuery({
+    queryKey: ["plugins", "downloader"],
+    queryFn: () => api.plugins("downloader"),
+    staleTime: 5 * 60_000,
+  });
+  const downloader = (downloaderData?.plugins ?? []).find((p) => p.configured);
+  const [busy, setBusy] = useState<number | null>(null);
+  if (!items) return <p className="text-muted-foreground">Loading...</p>;
+  if (!items.length) {
+    return (
+      <p className="text-muted-foreground">
+        Nothing saved yet. Press the bookmark on a release (or thumbs up in the player) to keep
+        it here without following the artist; you'll be told on its release day.
+      </p>
+    );
+  }
+  const rows: PlayRow[] = items.map((it) => ({
+    key: playKey(it),
+    artist: it.artist,
+    album: it.album,
+    mbid: it.mbid,
+    image: it.image,
+    date: it.release_date,
+  }));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  function remove(it: WishlistItem) {
+    setBusy(it.id);
+    api
+      .wishlistRemove(it.artist, it.album)
+      .then(() => {
+        qc.invalidateQueries({ queryKey: ["wishlist"] });
+        qc.invalidateQueries({ queryKey: ["discover"] });
+      })
+      .finally(() => setBusy(null));
+  }
+  function grab(it: WishlistItem) {
+    setBusy(it.id);
+    api
+      .grab(it.artist, it.album)
+      .then((r) => {
+        if (r.error) toast.error(r.error);
+        else toast.success(`${r.client}: ${r.message}`);
+      })
+      .catch(() => toast.error("Could not reach the server."))
+      .finally(() => setBusy(null));
+  }
+  return (
+    <div>
+      <p className="mb-3 text-sm text-muted-foreground">
+        {items.length} saved. Each is announced on its release day to the notifiers with
+        "Saved release out today" ticked
+        {autograb ? ", and sent to the download client" : ""} (Settings).
+      </p>
+      <div className="flex flex-col">
+        {items.map((it, i) => {
+          const key = rows[i]!.key;
+          const active = rowPlayer.activeKey === key;
+          const days = it.release_date
+            ? Math.round((new Date(it.release_date + "T00:00:00").getTime() - today.getTime()) / 86400000)
+            : null;
+          const href = albumHref({ artist: it.artist, album: it.album, mbid: it.mbid, image: it.image, normalized_date: it.release_date });
+          const starting = rowPlayer.starting?.key === key;
+          return (
+            <div
+              key={it.id}
+              className={
+                "-mx-2 flex items-center gap-3 rounded-lg px-2 py-2" +
+                (active ? " bg-primary/10 ring-1 ring-primary/40" : "")
+              }
+            >
+              <div className="relative flex-none">
+                <AlbumArt src={it.image} boxSize="72px" rounded="md" resolve={{ artist: it.artist, title: it.album, mbid: it.mbid }} />
+                <Button
+                  size="icon-xs"
+                  variant={active ? "default" : "secondary"}
+                  aria-label={active && rowPlayer.playing ? "Pause" : "Play"}
+                  disabled={starting}
+                  onClick={() => rowPlayer.play(rows[i]!, rows)}
+                  className="absolute right-1 bottom-1 rounded-full shadow-md"
+                >
+                  {starting ? <LuLoaderCircle className="animate-spin" /> : active && rowPlayer.playing ? <LuPause /> : <LuPlay />}
+                </Button>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold">
+                  {href ? <RouterLink to={href} className="hover:underline">{it.album}</RouterLink> : it.album}
+                </p>
+                <ArtistLink name={it.artist} />
+                <p className="text-sm text-muted-foreground">
+                  {formatDate(it.release_date)}
+                  {days != null ? ` · ${days === 0 ? "out today" : days < 0 ? "out now" : relativeDays(days)}` : ""}
+                  {it.grabbed_at ? " · sent to the download client" : ""}
+                </p>
+              </div>
+              <div className="flex flex-none items-center gap-1">
+                {downloader && (days == null || days <= 0) && (
+                  <Button size="xs" variant="outline" disabled={busy === it.id} onClick={() => grab(it)}
+                          title={`Search ${downloader.label} for this release and download it`}>
+                    <LuDownload /> Grab
+                  </Button>
+                )}
+                <Button size="icon-xs" variant="ghost" aria-label={`Remove ${it.album}`}
+                        disabled={busy === it.id} onClick={() => remove(it)}>
+                  <LuTrash2 />
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -896,6 +1333,7 @@ function SimilarRankings() {
   const [limit, setLimit] = useState(SIMILAR_PAGE);
   const [enrichBusy, setEnrichBusy] = useState(false);
   const genreAnchor = useComboboxAnchor();
+  const rowPlayer = useRowPlayer();
 
   const ranked = data?.artists ?? [];
   // Genre -> how many ranked artists carry it, most common first: the filter
@@ -950,6 +1388,13 @@ function SimilarRankings() {
     );
   }
   const shown = filtered.slice(0, limit);
+  // Play an artist's top tracks; with continue on, then the next one down.
+  const playRows: PlayRow[] = shown.map((s) => ({
+    key: "similar:" + s.name.toLowerCase(),
+    artist: s.name,
+    artistId: s.artist_id,
+    topTracksOnly: true,
+  }));
   const known = data?.genres_known ?? 0;
   const total = data?.genres_total ?? ranked.length;
   return (
@@ -1028,9 +1473,19 @@ function SimilarRankings() {
         </p>
       )}
       <div className="divide-y">
-        {shown.map((s) => (
-          <SimilarRow key={s.name} s={s} />
-        ))}
+        {shown.map((s, i) => {
+          const row = playRows[i]!;
+          return (
+            <SimilarRow
+              key={s.name}
+              s={s}
+              onPlay={() => rowPlayer.play(row, playRows)}
+              starting={rowPlayer.starting?.key === row.key}
+              active={rowPlayer.activeKey === row.key}
+              playing={rowPlayer.activeKey === row.key && rowPlayer.playing}
+            />
+          );
+        })}
       </div>
       {!shown.length && (
         <p className="text-muted-foreground">
@@ -1178,7 +1633,19 @@ function ScrobbleRow({ a }: { a: LastfmArtist }) {
 
 // One ranked artist, styled like the New Releases agenda rows: art, linked
 // name, why they're suggested, genres, and a follow button.
-function SimilarRow({ s }: { s: SimilarRanking }) {
+function SimilarRow({
+  s,
+  onPlay,
+  starting,
+  active,
+  playing,
+}: {
+  s: SimilarRanking;
+  onPlay: () => void;
+  starting: boolean;
+  active: boolean;
+  playing: boolean;
+}) {
   const { data: info } = useQuery({
     queryKey: ["similarInfo", s.name.toLowerCase()],
     queryFn: () => queuedSimilarInfo(s.name),
@@ -1197,9 +1664,28 @@ function SimilarRow({ s }: { s: SimilarRanking }) {
   const rowGenres = info?.genres?.length ? info.genres : s.genres;
   const sources = s.sources.slice(0, 6).join(", ");
   const more = s.sources.length > 6 ? ` +${s.sources.length - 6} more` : "";
+  const playLabel = active && playing ? "Pause" : active ? "Resume" : `Play ${s.name}'s top tracks`;
   return (
-    <div className="flex items-center gap-3 py-2.5">
-      <AlbumArt src={info?.image_url} boxSize="150px" rounded="md" />
+    <div
+      className={
+        "-mx-2 flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors" +
+        (active ? " bg-primary/10 ring-1 ring-primary/40" : "")
+      }
+    >
+      <div className="relative flex-none">
+        <AlbumArt src={info?.image_url} boxSize="150px" rounded="md" />
+        <Button
+          size="icon-sm"
+          variant={active ? "default" : "secondary"}
+          aria-label={playLabel}
+          title={playLabel}
+          disabled={starting}
+          onClick={onPlay}
+          className="absolute right-1.5 bottom-1.5 rounded-full shadow-md"
+        >
+          {starting ? <LuLoaderCircle className="animate-spin" /> : active && playing ? <LuPause /> : <LuPlay />}
+        </Button>
+      </div>
       <div className="min-w-0 flex-1">
         <p className="font-semibold">
           <ArtistLink name={s.name} artistId={s.artist_id} />

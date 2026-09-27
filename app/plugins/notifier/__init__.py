@@ -30,6 +30,8 @@ EVENTS = {
     "download_done": "Soulseek download finished",
     "download_partial": "Soulseek download ended incomplete",
     "scan_done": "Library scan finished",
+    "discover_digest": "Weekly Discover picks",
+    "wishlist_release_day": "Saved release out today",
 }
 
 

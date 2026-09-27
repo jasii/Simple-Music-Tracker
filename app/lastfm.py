@@ -234,6 +234,19 @@ def username():
     return (db.get_setting("lastfm_username") or "").strip()
 
 
+def cached_top_artists(period="overall", limit=1000):
+    """top_artists as last stored, however old, without asking Last.fm.
+
+    For code that runs inside a page request (the Discover ranking): a stale
+    answer is fine there, a network round trip is not. Empty when nothing is
+    stored yet.
+    """
+    user = username()
+    if not user:
+        return []
+    return db.get_json_cache(f"lfuser:top:{user.lower()}:{period}:{limit}") or []
+
+
 def top_artists(period="overall", limit=200, max_age=db.FROM_SETTINGS):
     """The user's most-scrobbled artists: [{name, playcount, url, image_url}].
 

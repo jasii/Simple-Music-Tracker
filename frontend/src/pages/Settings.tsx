@@ -713,6 +713,22 @@ export default function Settings() {
 
         <PrewarmSection get={get} set={set} />
 
+        <Section>
+          <Legend>Saved releases</Legend>
+          <Hint>
+            Releases saved for later (the bookmark on Discover, or thumbs up in the player)
+            are announced on their release day to every notifier with "Saved release out
+            today" ticked under Notifications.
+          </Hint>
+          <Check
+            checked={get("wishlist_autograb") === "true"}
+            onChange={(c) => set("wishlist_autograb", c ? "true" : "false")}
+          >
+            Also send each one to the download client on its release day
+          </Check>
+          <Hint>Uses the quality profile and download client set under Downloads &amp; quality.</Hint>
+        </Section>
+
 
         <PluginsTab
             show={["discovery"]}
@@ -829,6 +845,8 @@ export default function Settings() {
             testResult={pluginTest}
             onTest={testPlugin}
           />
+
+        <DigestSection get={get} set={set} />
 
         {/* The generic escape hatch: anything without a plugin of its own --
             Home Assistant, n8n, a script -- takes a webhook. */}
@@ -2675,6 +2693,122 @@ function SearchLinksSection({
       >
         <LuPlus /> Add a search
       </Button>
+    </Section>
+  );
+}
+
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+// The weekly Discover digest (app/digest.py): this week's top picks by the
+// For you ranking, sent to the notifiers that tick "Weekly Discover picks".
+function DigestSection({
+  get,
+  set,
+}: {
+  get: (k: string) => string;
+  set: (k: string, v: string) => void;
+}) {
+  const { data: preview, refetch } = useQuery({
+    queryKey: ["discoverDigest"],
+    queryFn: () => api.discoverDigest(),
+    staleTime: 60_000,
+  });
+  const [result, setResult] = useState("");
+  const [busy, setBusy] = useState(false);
+  function sendNow() {
+    setBusy(true);
+    setResult("");
+    api
+      .discoverDigestSend()
+      .then((r) => setResult(r.message))
+      .catch(() => setResult("Could not send it."))
+      .finally(() => setBusy(false));
+  }
+  const on = get("discover_digest_enabled") === "true";
+  return (
+    <Section>
+      <Legend>Weekly Discover digest</Legend>
+      <Hint>
+        Once a week, the Discover releases from the past six days and the week ahead are
+        ranked the way the page's "For you" sort ranks them, and the top ones are sent as one
+        message. Records you own or have already played are left out. It goes to every
+        notifier above with "Weekly Discover picks" ticked.
+      </Hint>
+      <Check
+        checked={on}
+        onChange={(c) => {
+          set("discover_digest_enabled", c ? "true" : "false");
+          setTimeout(() => refetch(), 1500);
+        }}
+      >
+        Send the digest every week
+      </Check>
+      <div className="mt-1 flex flex-wrap items-end gap-3">
+        <div>
+          <Label htmlFor="discover_digest_day">Day</Label>
+          <Select value={get("discover_digest_day") || "4"} onValueChange={(v) => set("discover_digest_day", v)}>
+            <SelectTrigger id="discover_digest_day" className="w-36"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {WEEKDAYS.map((d, i) => <SelectItem key={d} value={String(i)}>{d}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label htmlFor="discover_digest_time">Time</Label>
+          <Input
+            id="discover_digest_time"
+            type="time"
+            className="w-32"
+            value={get("discover_digest_time") || "09:00"}
+            onChange={(e) => set("discover_digest_time", e.target.value)}
+          />
+        </div>
+        <div>
+          <Label htmlFor="discover_digest_count">Releases</Label>
+          <Input
+            id="discover_digest_count"
+            type="number"
+            min={1}
+            max={25}
+            className="w-24"
+            value={get("discover_digest_count") || "10"}
+            onChange={(e) => set("discover_digest_count", e.target.value)}
+          />
+        </div>
+      </div>
+      <Label htmlFor="app_base_url">This app's address</Label>
+      <Input
+        id="app_base_url"
+        placeholder="https://music.example.com"
+        value={get("app_base_url")}
+        onChange={(e) => set("app_base_url", e.target.value)}
+      />
+      <Hint>
+        Where you open the app from. Messages link back to it (the digest to Discover, a
+        saved release to its album page); leave blank for no links.
+      </Hint>
+      {preview && preview.subscribers === 0 && (
+        <Alert className="mb-3">
+          <AlertDescription>
+            No notifier has "Weekly Discover picks" ticked yet, so the digest has nowhere to go.
+          </AlertDescription>
+        </Alert>
+      )}
+      {preview?.message && (
+        <div className="mb-3 rounded-md border p-3">
+          <p className="text-sm font-semibold">{preview.title}</p>
+          <pre className="mt-1 text-xs whitespace-pre-wrap text-muted-foreground">{preview.message}</pre>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="outline" disabled={busy} onClick={sendNow}>
+          {busy ? "Sending..." : "Send it now"}
+        </Button>
+        <span className="text-sm text-muted-foreground">
+          {result ||
+            (on && preview?.next_run ? `Next: ${new Date(preview.next_run * 1000).toLocaleString()}` : "")}
+        </span>
+      </div>
     </Section>
   );
 }

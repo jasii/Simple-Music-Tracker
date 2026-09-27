@@ -46,11 +46,13 @@ def _configured():
     return bool(registry.sources("artist_genres"))
 
 
-def _run(limit):
+def _run(limit, names=None):
     if not _configured():
         _set(running=False, message="No metadata source can look up genre tags.")
         return
-    names = db.similar_artists_missing_genres(limit or None)
+    # Given names (the Discover feed's artists) or the suggestion ranking.
+    if names is None:
+        names = db.similar_artists_missing_genres(limit or None)
     _set(running=True, done=0, total=len(names), fetched=0, skipped_cached=0,
          current="", message="")
     stopped = False
@@ -84,20 +86,23 @@ def _run(limit):
         db.set_json_cache(_ACTIVE_KEY, {"running": False})
 
 
-def start(limit=0):
+def start(limit=0, names=None):
     """Start the lookup in a daemon thread. Returns False if already running.
 
     *limit* caps how many artists this run covers (0 = the whole ranking).
+    *names* looks up those artists instead of the ranking (Discover's
+    New Releases); such a run isn't resumed after a restart.
     """
     if not _run_lock.acquire(blocking=False):
         return False
     def runner():
         try:
-            _run(limit)
+            _run(limit, names)
         finally:
             _run_lock.release()
     _set(running=True, message="")
-    db.set_json_cache(_ACTIVE_KEY, {"running": True, "limit": limit})
+    if names is None:
+        db.set_json_cache(_ACTIVE_KEY, {"running": True, "limit": limit})
     threading.Thread(target=runner, daemon=True).start()
     return True
 

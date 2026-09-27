@@ -1,6 +1,7 @@
 import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { NavLink, Link as RouterLink, Outlet } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { NavLink, Link as RouterLink, Outlet, useLocation } from "react-router-dom";
+import { api } from "../api";
 import { ColorModeButton } from "./ui/color-mode";
 import { GradientDefs } from "./GradientDefs";
 import { PreviewPlayerProvider } from "./PreviewPlayer";
@@ -10,6 +11,15 @@ import { prefetchRoute, warmRoutes } from "../prefetch";
 export default function Layout() {
   const nav = useNav();
   const qc = useQueryClient();
+  const { pathname } = useLocation();
+  // Releases Discover has found since you last looked, for a count on its tab.
+  const { data: unseen } = useQuery({
+    queryKey: ["discoverUnseen"],
+    queryFn: () => api.discoverUnseen(),
+    refetchInterval: 15 * 60_000,
+    staleTime: 5 * 60_000,
+  });
+  const newOnDiscover = pathname.startsWith("/discover") ? 0 : unseen?.count ?? 0;
 
   // Warm the pages behind the nav once this one has painted, so the first
   // switch doesn't wait on a request either.
@@ -45,6 +55,14 @@ export default function Layout() {
                   }
                 >
                   {item.label}
+                  {item.key === "discover" && newOnDiscover > 0 && (
+                    <span
+                      className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-sky-500/20 px-1.5 text-xs font-semibold text-sky-700 no-underline dark:text-sky-300"
+                      title={`${newOnDiscover} new since your last visit`}
+                    >
+                      {newOnDiscover > 99 ? "99+" : newOnDiscover}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             <ColorModeButton />

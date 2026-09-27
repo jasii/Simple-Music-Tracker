@@ -74,9 +74,33 @@ Each release shows the artist's genres as tags, and has a **play button**: it
 plays the release's tracks (your own copy if a library has it, else a preview),
 or the artist's top tracks when nothing on the record is out yet, and the player
 says so. Switch on **Continue to next artist** and it carries on down the list;
-the row playing is highlighted. The audio for every release from this week to a
-month out, on Discover and Upcoming, is **looked up in the background** ahead of
-time (Settings > Discovery > Pre-load audio), so play starts at once.
+the row playing is highlighted, and releases you've already heard are skipped.
+The audio for every release from this week to a month out, on Discover and
+Upcoming, is **looked up in the background** ahead of time (Settings >
+Discovery > Pre-load audio), so play starts at once.
+
+- **For you:** sort the feed by how well each release fits you (similar to
+  your artists, your Last.fm plays, the genres you collect, critic score, how
+  many sources list it), with the reasons on each row. Or sort by **critic
+  score** (Metascores from Metacritic's new releases).
+- **Genre filter:** show only some genres, or hide some; click any genre tag
+  to filter by it. A button looks up tags for the artists that have none.
+- **Heard:** releases you've played are marked and dimmed, can be hidden, and
+  the continue walk skips them.
+- **New since your last visit:** marked on the rows, and counted on the
+  Discover tab in the navigation.
+- **Save for later:** bookmark a release without following the artist. The
+  **Saved** tab lists them; each is announced on its release day and can be
+  grabbed automatically then.
+- **Weekly digest:** the week's top picks by the For you ranking, sent to your
+  notifiers on a day and time you choose.
+
+The player plays the whole list the same way on **Upcoming** and on **Similar
+Artists** (their top tracks). It has a queue view, a **next artist** button,
+**thumbs up** (save the release or follow the artist) and **thumbs down**
+(hide the release from Discover), keyboard shortcuts (space, `n`, `p`,
+shift+`N`), lock-screen and headphone controls on phones, and a sampler setting
+that plays only a release's most played tracks.
 
 ### Missing and grabbing
 
@@ -114,7 +138,8 @@ time (Settings > Discovery > Pre-load audio), so play starts at once.
 - **Notifications** through **ntfy**, **Gotify**, **Discord** or a **custom
   webhook**, each subscribed to the events it wants: new release found, release
   day, release sent to the download client, Soulseek download finished or
-  incomplete, and scan finished.
+  incomplete, scan finished, the weekly Discover picks, and a saved release
+  coming out.
 - **Search links:** add your own search sites (a tracker, a record shop, a
   wiki) with a URL like `https://example.com/torrents.php?searchstr={query}`;
   each shows as an icon, the site's own favicon or one you choose, beside every
@@ -336,6 +361,10 @@ Everything the UI does goes through the JSON API. The most useful endpoints:
 | GET  | `/api/artist-top-tracks` | An artist's top tracks with audio, by name. Params `artist`, `limit` (1-10). |
 | GET  | `/api/prewarm/status` · POST `/api/prewarm` | Pre-load of this month's release audio: progress, or start it (`{"stop": true}` stops). |
 | GET  | `/api/search-links` | Your search sites, with their icons. |
+| GET/POST/DELETE | `/api/wishlist` | Releases saved for later. POST `{"artist", "album", "mbid"?, "release_date"?, "image"?}`, DELETE `{"artist", "album"}`. |
+| POST/DELETE | `/api/heard` | Mark a release as listened to, or not. Body `{"artist", "album"}`. |
+| GET  | `/api/discover/unseen` | How many Discover releases are new since the last visit. |
+| GET  | `/api/discover/digest` · POST `/api/discover/digest/send` | Preview the weekly digest, or send it now. |
 | GET  | `/api/album` | Tracklist, cover and what you own of one release. Params `artist`, `title`, `mbid`. |
 | GET  | `/api/library/missing` | Releases no library owns. Params `q`, `types`, `sort`, `limit`, `offset`. |
 | GET  | `/api/library/incomplete` | Albums owned with fewer tracks than a complete copy. |

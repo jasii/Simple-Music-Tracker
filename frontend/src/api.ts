@@ -29,8 +29,10 @@ import type {
   SystemInfo,
   LibraryGapsResponse,
   PluginInfo,
+  DigestPreview,
   PrewarmState,
   SearchLink,
+  WishlistItem,
   SimilarArtistInfo,
   SimilarEnrichState,
   SimilarRankingsResponse,
@@ -335,13 +337,15 @@ export const api = {
   // exists. Cached server-side, so this is cheap after the first open.
   // Which of a release's tracks can be played, and from where. The first call
   // starts the background pass; poll while running to fill rows in as they land.
-  albumPlayable: (artist: string, title: string, mbid?: string) =>
+  albumPlayable: (artist: string, title: string, mbid?: string, hot = false) =>
     getJSON<{
       ready: boolean;
       running: boolean;
       progress?: { done?: number; total?: number };
       // The track titles in tracklist order.
       order?: string[];
+      // With hot: the titles Last.fm listeners play most, most played first.
+      ranked?: string[];
       tracks: Record<string, {
         kind: string;
         label?: string;
@@ -354,7 +358,8 @@ export const api = {
     }>(
       "/api/album/playable?artist=" + encodeURIComponent(artist) +
         "&title=" + encodeURIComponent(title) +
-        (mbid ? "&mbid=" + encodeURIComponent(mbid) : ""),
+        (mbid ? "&mbid=" + encodeURIComponent(mbid) : "") +
+        (hot ? "&hot=1" : ""),
     ),
   // Where one track can be played from: an in-app stream (library copy or
   // sample), else the YouTube id Last.fm's own player uses.
@@ -394,6 +399,38 @@ export const api = {
     ),
   // The user's own search sites (Settings > Downloads & quality).
   searchLinks: () => getJSON<{ links: SearchLink[] }>("/api/search-links"),
+  // Heard: a release listened to in the player (or not, to undo it).
+  markHeard: (artist: string, album: string | null | undefined, heard = true) =>
+    fetch("/api/heard", {
+      method: heard ? "POST" : "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ artist, album: album || "" }),
+    }).then((r) => r.json()),
+  // Saved for later.
+  wishlist: () => getJSON<{ items: WishlistItem[]; autograb: boolean }>("/api/wishlist"),
+  wishlistAdd: (item: {
+    artist: string;
+    album: string;
+    mbid?: string | null;
+    release_date?: string | null;
+    image?: string | null;
+  }) => postJSON<{ item?: WishlistItem; error?: string }>("/api/wishlist", item),
+  wishlistRemove: (artist: string, album: string) =>
+    fetch("/api/wishlist", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ artist, album }),
+    }).then((r) => r.json() as Promise<{ removed: boolean }>),
+  // Discover visits: "new since last visit", and the nav's count of them.
+  discoverVisit: () => postJSON<{ last_visit: number | null }>("/api/discover/visit"),
+  discoverUnseen: () => getJSON<{ count: number }>("/api/discover/unseen"),
+  // Genre tags for every Discover artist without them (progress: similarEnrichStatus).
+  discoverGenres: () =>
+    postJSON<SimilarEnrichState & { started: boolean; missing: number }>("/api/discover/genres"),
+  // The weekly digest: what it would send, and sending it now.
+  discoverDigest: () => getJSON<DigestPreview>("/api/discover/digest"),
+  discoverDigestSend: () =>
+    postJSON<{ sent: number; picks: number; message: string }>("/api/discover/digest/send"),
   // Pre-load what this month's releases play from.
   prewarmStatus: () => getJSON<PrewarmState>("/api/prewarm/status"),
   prewarmStart: () => postJSON<PrewarmState>("/api/prewarm"),

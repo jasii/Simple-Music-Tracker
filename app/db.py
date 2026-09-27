@@ -10,6 +10,7 @@ import sqlite3
 import threading
 import time
 import unicodedata
+from datetime import date
 
 DB_PATH = os.environ.get("SMT_DB_PATH", os.path.join("data", "tracker.db"))
 
@@ -138,6 +139,32 @@ CREATE TABLE IF NOT EXISTS discover_ignores (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_discover_ignores
     ON discover_ignores (artist COLLATE NOCASE, album COLLATE NOCASE);
+
+-- Discover releases the user has played in the player (lowercased keys;
+-- album '' for an artist-level row). Drives the "heard" dimming and lets the
+-- continue-to-next walk skip what's already been listened to.
+CREATE TABLE IF NOT EXISTS heard_releases (
+    artist    TEXT NOT NULL,
+    album     TEXT NOT NULL DEFAULT '',
+    heard_at  REAL NOT NULL,
+    PRIMARY KEY (artist, album)
+);
+
+-- Releases saved for later ("wishlist"), without following the artist. The
+-- scheduler announces each on its release day (and can grab it).
+CREATE TABLE IF NOT EXISTS wishlist (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist        TEXT NOT NULL,
+    album         TEXT NOT NULL,
+    mbid          TEXT,
+    release_date  TEXT,             -- ISO date when known
+    image         TEXT,
+    added_at      REAL NOT NULL,
+    notified_at   REAL,             -- release-day reminder sent
+    grabbed_at    REAL              -- sent to the download client
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wishlist
+    ON wishlist (artist COLLATE NOCASE, album COLLATE NOCASE);
 
 -- Similar-artist suggestions seen while browsing artist pages (from Last.fm).
 -- Aggregated to rank artists that are "similar to many of yours but
@@ -305,6 +332,15 @@ DEFAULT_SETTINGS = {
     # Your own search sites, shown beside every release's links: a JSON list
     # of {"name", "url", "icon"} (see app/plugins/search).
     "search_custom_sites": "[]",
+    # The weekly Discover digest (app/digest.py): off until switched on.
+    "discover_digest_enabled": "false",
+    "discover_digest_day": "4",       # 0 = Monday ... 4 = Friday
+    "discover_digest_time": "09:00",
+    "discover_digest_count": "10",
+    # This app's public address, for links in notifications. Blank = none.
+    "app_base_url": "",
+    # Send a saved release to the download client on its release day.
+    "wishlist_autograb": "false",
     "discover_lastfm_enabled": "true",      # show the Last.fm source on Discover
     "discover_metacritic_enabled": "true",  # show the Metacritic source on Discover
     "discover_aoty_enabled": "true",        # albumoftheyear.org upcoming grid
@@ -1042,6 +1078,163 @@ def fill_artist_genres(name, genres):
             conn.commit()
         finally:
             conn.close()
+
+
+# --- heard releases ---------------------------------------------------------
+
+def _heard_key(artist, album):
+    return (artist or "").strip().lower(), (album or "").strip().lower()
+
+
+def mark_heard(artist, album=None, heard=True):
+    """Record (or with heard=False, forget) that a release has been listened to."""
+    a, b = _heard_key(artist, album)
+    if not a:
+        return False
+    with _write_lock:
+        conn = get_connection()
+        try:
+            if heard:
+                conn.execute(
+                    "INSERT INTO heard_releases (artist, album, heard_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(artist, album) DO UPDATE SET heard_at = excluded.heard_at",
+                    (a, b, time.time()),
+                )
+            else:
+                conn.execute("DELETE FROM heard_releases WHERE artist = ? AND album = ?", (a, b))
+            conn.commit()
+        finally:
+            conn.close()
+    return True
+
+
+def heard_set():
+    """{(artist, album)} of every release listened to, lowercased."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT artist, album FROM heard_releases").fetchall()
+    finally:
+        conn.close()
+    return {(r["artist"], r["album"]) for r in rows}
+
+
+# --- wishlist (saved for later) ----------------------------------------------
+
+def _wishlist_row(r):
+    return {k: r[k] for k in r.keys()}
+
+
+def list_wishlist():
+    """Every saved release, soonest release first (undated last)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM wishlist ORDER BY COALESCE(release_date, '9999'), "
+            "artist COLLATE NOCASE"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_wishlist_row(r) for r in rows]
+
+
+def add_wishlist(artist, album, mbid=None, release_date=None, image=None):
+    """Save a release for later. Returns the row (the existing one if saved)."""
+    artist = (artist or "").strip()
+    album = (album or "").strip()
+    if not artist or not album:
+        return None
+    now = time.time()
+    release_date = (release_date or "").strip()[:10] or None
+    # Already out when saved: there's no release day left to announce.
+    notified = now if release_date and release_date <= date.today().isoformat() else None
+    with _write_lock:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO wishlist (artist, album, mbid, release_date, "
+                "image, added_at, notified_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (artist, album, mbid or None, release_date, image or None, now, notified),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM wishlist WHERE artist = ? COLLATE NOCASE "
+                "AND album = ? COLLATE NOCASE", (artist, album),
+            ).fetchone()
+        finally:
+            conn.close()
+    return _wishlist_row(row) if row else None
+
+
+def remove_wishlist(item_id=None, artist=None, album=None):
+    """Forget a saved release, by id or by artist + album."""
+    with _write_lock:
+        conn = get_connection()
+        try:
+            if item_id is not None:
+                cur = conn.execute("DELETE FROM wishlist WHERE id = ?", (item_id,))
+            else:
+                cur = conn.execute(
+                    "DELETE FROM wishlist WHERE artist = ? COLLATE NOCASE "
+                    "AND album = ? COLLATE NOCASE", ((artist or "").strip(), (album or "").strip()),
+                )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+
+def wishlist_keys():
+    """{(artist, album)} of every saved release, lowercased."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT artist, album FROM wishlist").fetchall()
+    finally:
+        conn.close()
+    return {(r["artist"].lower(), r["album"].lower()) for r in rows}
+
+
+def wishlist_due(today):
+    """Saved releases out on or before *today* (ISO) not yet announced."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM wishlist WHERE notified_at IS NULL "
+            "AND release_date IS NOT NULL AND release_date <= ?", (today,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_wishlist_row(r) for r in rows]
+
+
+def mark_wishlist(item_id, **stamps):
+    """Set notified_at / grabbed_at on a saved release (now)."""
+    cols = [c for c in ("notified_at", "grabbed_at") if stamps.get(c)]
+    if not cols:
+        return
+    with _write_lock:
+        conn = get_connection()
+        try:
+            conn.execute(
+                f"UPDATE wishlist SET {', '.join(c + ' = ?' for c in cols)} WHERE id = ?",
+                [time.time()] * len(cols) + [item_id],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def discover_first_seen():
+    """{(artist, album)} lowercased -> when any source first listed it."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT lower(json_extract(payload, '$.artist')) AS a, "
+            "lower(json_extract(payload, '$.album')) AS b, MIN(first_seen) AS t "
+            "FROM discover_history GROUP BY a, b"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {((r["a"] or "").strip(), (r["b"] or "").strip()): r["t"] for r in rows}
 
 
 def add_discover_ignore(artist, album=None):

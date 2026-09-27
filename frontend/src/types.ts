@@ -137,6 +137,40 @@ export interface DiscoverItem {
   album_url?: string | null;
   // The artist's own genre tags (the release's are `genres`), when known.
   artist_genres?: string[];
+  // Played in the player before (see /api/heard).
+  heard?: boolean;
+  // On the saved-for-later list.
+  saved?: boolean;
+  // When a source first listed it (epoch seconds), for "new since last visit".
+  first_seen?: number | null;
+  // Metascore, when Metacritic has one, and its page.
+  score?: number | null;
+  score_url?: string | null;
+  // The "For you" ranking and what it's made of, biggest reason first.
+  for_you?: number;
+  reasons?: string[];
+}
+
+// A release saved for later (the wishlist).
+export interface WishlistItem {
+  id: number;
+  artist: string;
+  album: string;
+  mbid: string | null;
+  release_date: string | null;
+  image: string | null;
+  added_at: number;
+  notified_at: number | null;
+  grabbed_at: number | null;
+}
+
+// What the weekly Discover digest would send now.
+export interface DigestPreview {
+  enabled: boolean;
+  next_run: number | null;
+  title: string;
+  message: string;
+  subscribers: number;
 }
 
 export interface DiscoverSourceStatus {

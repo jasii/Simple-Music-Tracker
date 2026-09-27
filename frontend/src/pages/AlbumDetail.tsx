@@ -189,6 +189,9 @@ export default function AlbumDetail() {
       note: found && found.kind !== "none" ? found.label ?? null : null,
       noteUrl: found?.source_url ?? null,
       noteIcon: found?.icon ?? null,
+      image: img || data?.image,
+      // What thumbs up/down in the player act on.
+      release: { artist, album: title, mbid: mbid || null, date: releaseDate || null, image: img || data?.image },
       // A resolved stream plays straight away; a video is left to the player,
       // which asks for the id (already cached by the pass above).
       src: found?.stream ?? null,

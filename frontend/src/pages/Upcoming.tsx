@@ -21,8 +21,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { LuLoaderCircle, LuPlay, LuRadio } from "react-icons/lu";
+import { LuLoaderCircle, LuPause, LuPlay, LuRadio } from "react-icons/lu";
 import { toast } from "sonner";
+import { Label } from "../components/ui/label";
+import { Switch } from "../components/ui/switch";
+import { useRowPlayer, type PlayRow, type Starting } from "../lib/listPlay";
+import { continueOn, setContinueOn } from "../lib/playPrefs";
 
 const TYPES = [
   { value: "Album", label: "Albums" },
@@ -179,10 +183,54 @@ function HypeButtons() {
   );
 }
 
-function AgendaRow({ r }: { r: UpcomingRelease }) {
+function toPlayRow(r: UpcomingRelease): PlayRow {
+  return {
+    key: `upcoming:${r.artist_name.toLowerCase()}|${r.title.toLowerCase()}`,
+    artist: r.artist_name,
+    album: r.title,
+    mbid: r.mbid,
+    artistId: r.artist_id,
+    image: r.image_url,
+    date: r.normalized_date,
+  };
+}
+
+function AgendaRow({
+  r,
+  onPlay,
+  starting,
+  active,
+  playing,
+}: {
+  r: UpcomingRelease;
+  onPlay: () => void;
+  starting: Starting | null;
+  active: boolean;
+  playing: boolean;
+}) {
+  const playLabel = active && playing ? "Pause" : active ? "Resume" : "Play this release";
   return (
-    <div className="flex items-center gap-3 py-2.5">
-      <AlbumArt src={r.image_url} boxSize="150px" rounded="md" />
+    <div
+      className={
+        "-mx-2 flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors" +
+        (active ? " bg-primary/10 ring-1 ring-primary/40" : "")
+      }
+    >
+      <div className="relative flex-none">
+        <AlbumArt src={r.image_url} boxSize="150px" rounded="md" />
+        {/* Not out yet, usually: this plays the artist's top tracks then. */}
+        <Button
+          size="icon-sm"
+          variant={active ? "default" : "secondary"}
+          aria-label={playLabel}
+          title={playLabel}
+          disabled={!!starting}
+          onClick={onPlay}
+          className="absolute right-1.5 bottom-1.5 rounded-full shadow-md"
+        >
+          {starting ? <LuLoaderCircle className="animate-spin" /> : active && playing ? <LuPause /> : <LuPlay />}
+        </Button>
+      </div>
       <div className="min-w-0 flex-1">
         <p className="font-semibold">
           <RouterLink to={albumHref(r)} className="hover:underline">{r.title}</RouterLink>
@@ -247,6 +295,9 @@ export default function Upcoming() {
     () => (items || []).filter((r) => !r.primary_type || !hiddenTypes.has(r.primary_type)),
     [items, hiddenTypes],
   );
+  const rowPlayer = useRowPlayer();
+  const playRows = useMemo(() => visible.map(toPlayRow), [visible]);
+  const [continueNext, setContinueNext] = useState<boolean>(continueOn);
 
   return (
     <div>
@@ -269,6 +320,16 @@ export default function Upcoming() {
             })}
           </div>
           <HypeButtons />
+          {view === "agenda" && (
+            <div className="flex items-center gap-2">
+              <Switch
+                id="upcoming-continue"
+                checked={continueNext}
+                onCheckedChange={(v) => { setContinueNext(v); setContinueOn(v); }}
+              />
+              <Label htmlFor="upcoming-continue">Continue to next artist</Label>
+            </div>
+          )}
           <ViewToggle view={view} onChange={changeView} />
         </div>
       </div>
@@ -286,7 +347,19 @@ export default function Upcoming() {
       ) : (
         <Agenda
           items={visible}
-          renderItem={(r, k) => <AgendaRow key={k} r={r} />}
+          renderItem={(r, k) => {
+            const row = toPlayRow(r);
+            return (
+              <AgendaRow
+                key={k}
+                r={r}
+                onPlay={() => rowPlayer.play(row, playRows)}
+                starting={rowPlayer.starting?.key === row.key ? rowPlayer.starting : null}
+                active={rowPlayer.activeKey === row.key}
+                playing={rowPlayer.activeKey === row.key && rowPlayer.playing}
+              />
+            );
+          }}
           emptyMsg="No upcoming releases from artists you follow."
         />
       )}

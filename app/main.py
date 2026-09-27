@@ -32,10 +32,13 @@ from . import (
     artistart,
     artwork,
     calendar_feed,
+    critics,
     db,
+    digest,
     downloads,
     duplicates,
     exclusives,
+    foryou,
     gaps,
     grabber,
     hype,
@@ -59,6 +62,7 @@ from . import (
     tracker,
     videoaudio,
     webhooks,
+    wishlist,
 )
 # Importing the plugin packages registers their plugins with the registry above:
 # discovery (Last.fm, Metacritic, ...) and library (filesystem, Subsonic, ...).
@@ -1019,7 +1023,15 @@ def api_album_playable():
         artist, title, mbid=(request.args.get("mbid") or "").strip() or None
     )
     tracks = [(t.get("name"), t.get("url")) for t in detail.get("tracks") or []]
-    return jsonify(playable.status(artist, title, tracks))
+    state = playable.status(artist, title, tracks)
+    if request.args.get("hot") == "1":
+        # The tracklist, most played on Last.fm first: what a sampler that
+        # plays only a few tracks of each release should start with.
+        marked = _mark_hot_tracks(artist, [{"name": t} for t, _u in tracks if t])
+        state["ranked"] = [t["name"] for t in sorted(
+            (t for t in marked if t.get("playcount")),
+            key=lambda t: -t["playcount"])]
+    return jsonify(state)
 
 
 @app.route("/api/track-stream")
@@ -1883,7 +1895,125 @@ def api_discover_releases():
         "count": len(items),
         "items": items,
         "refreshing": any(s.get("refreshing") for s in sources),
+        # Rows first listed after this are "new since your last visit".
+        "last_visit": _visit_setting("discover_prev_visit"),
     })
+
+
+def _visit_setting(key):
+    try:
+        return float(db.get_setting(key) or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
+# A reload, or coming back within this long, is the same visit: the rows
+# marked new stay marked instead of vanishing on the second look.
+_VISIT_GAP_S = 30 * 60
+
+
+@app.route("/api/discover/visit", methods=["POST"])
+def api_discover_visit():
+    """Record a look at Discover. The visit before this one is what "new" is
+    measured from (see last_visit on /api/discover/releases)."""
+    now = time.time()
+    last = _visit_setting("discover_last_visit")
+    if not last or now - last > _VISIT_GAP_S:
+        db.set_setting("discover_prev_visit", str(last or now))
+    db.set_setting("discover_last_visit", str(now))
+    return jsonify({"last_visit": _visit_setting("discover_prev_visit")})
+
+
+@app.route("/api/discover/unseen")
+def api_discover_unseen():
+    """How many Discover releases have appeared since the last visit (nav badge)."""
+    last = _visit_setting("discover_last_visit")
+    if not last:
+        return jsonify({"count": 0})
+    _sources, items = discover_feed(kick=False)
+    return jsonify({"count": sum(1 for it in items if (it.get("first_seen") or 0) > last)})
+
+
+@app.route("/api/heard", methods=["POST", "DELETE"])
+def api_heard():
+    """Mark a release as listened to (POST) or not (DELETE). Body: {artist, album?}."""
+    payload = request.get_json(silent=True) or {}
+    ok = db.mark_heard(payload.get("artist"), payload.get("album"),
+                       heard=request.method == "POST")
+    if not ok:
+        return jsonify({"error": "artist is required"}), 400
+    return jsonify({"heard": request.method == "POST"})
+
+
+@app.route("/api/wishlist", methods=["GET", "POST", "DELETE"])
+def api_wishlist():
+    """Releases saved for later.
+
+    GET lists them; POST {artist, album, mbid?, release_date?, image?} saves
+    one; DELETE {artist, album} forgets one. Each saved release is announced
+    on its release day (the "Saved release out today" event).
+    """
+    if request.method == "GET":
+        return jsonify({"items": db.list_wishlist(),
+                        "autograb": wishlist.autograb()})
+    payload = request.get_json(silent=True) or {}
+    if request.method == "DELETE":
+        return jsonify({"removed": db.remove_wishlist(
+            artist=payload.get("artist"), album=payload.get("album"))})
+    row = db.add_wishlist(payload.get("artist"), payload.get("album"),
+                          payload.get("mbid"), payload.get("release_date"),
+                          payload.get("image"))
+    if row is None:
+        return jsonify({"error": "artist and album are required"}), 400
+    return jsonify({"item": row})
+
+
+@app.route("/api/wishlist/<int:item_id>", methods=["DELETE"])
+def api_wishlist_delete(item_id):
+    return jsonify({"removed": db.remove_wishlist(item_id)})
+
+
+@app.route("/api/discover/digest")
+def api_discover_digest():
+    """What the weekly digest would send right now, and when it next goes."""
+    rows = digest.picks()
+    title, message = digest.compose(rows) if rows else ("", "")
+    when = digest.next_run()
+    return jsonify({
+        "enabled": digest.enabled(),
+        "next_run": when.timestamp() if when else None,
+        "title": title,
+        "message": message,
+        "subscribers": len(notifier.subscribers(digest.EVENT)),
+    })
+
+
+@app.route("/api/discover/digest/send", methods=["POST"])
+def api_discover_digest_send():
+    """Send the weekly digest now."""
+    return jsonify(digest.send())
+
+
+@app.route("/api/discover/genres", methods=["POST"])
+def api_discover_genres():
+    """Look up genre tags for every Discover artist that has none yet.
+
+    Runs as the same background lookup as the Similar Artists one (its
+    progress is /api/similar/enrich/status).
+    """
+    _sources, items = discover_feed(kick=False)
+    names = []
+    seen = set()
+    for it in items:
+        name = (it.get("artist") or "").strip()
+        if name and not it.get("artist_genres") and name.lower() not in seen:
+            seen.add(name.lower())
+            names.append(name)
+    started = similar_enrich.start(names=names) if names else False
+    state = similar_enrich.get_state()
+    state["started"] = started
+    state["missing"] = len(names)
+    return jsonify(state)
 
 
 def discover_feed(refresh=None, kick=True):
@@ -1947,6 +2077,8 @@ def discover_feed(refresh=None, kick=True):
 
     items = _drop_non_artists(items)
     _flag_known_artists(items)
+    # Rank for "For you", and flag heard / saved / new / critic score.
+    foryou.annotate(items)
     items.sort(key=lambda r: r.get("normalized_date") or "9999")
     return sources, items
 

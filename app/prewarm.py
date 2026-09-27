@@ -9,7 +9,9 @@ page reads (see app/playable.py), so playing them is instant.
 
 For a record that isn't out yet there's usually nothing on it to play, so the
 artist's top tracks are looked up too: that's what the Discover play button
-falls back to. The artist's genre tags come along, for the Discover rows.
+falls back to. The artist's genre tags and most played songs come along, for
+the Discover rows and the sampler, and the For you ranking's inputs (your
+Last.fm plays, critic scores) are refreshed first.
 
 Politeness: one release at a time, a short pause after each one that had to
 go to the network, cached releases passed over for free, one run at a time.
@@ -20,7 +22,7 @@ import time
 from datetime import date, timedelta
 
 from . import album as album_detail
-from . import db, playable, similar
+from . import critics, db, lastfm, playable, similar
 
 # How far past today releases count as "this month".
 WINDOW_DAYS = 30
@@ -114,9 +116,11 @@ def warm_release(artist, title, mbid=None):
     detail = album_detail.get_album_detail(artist, title, mbid=mbid)
     tracks = [(t.get("name"), t.get("url")) for t in detail.get("tracks") or []]
     answers = playable.build(artist, title, tracks) if tracks else {}
-    # Genre tags for the Discover row, whatever else happens.
+    # Genre tags for the Discover row, and the artist's most played songs
+    # (the sampler starts a release with those), whatever else happens.
     try:
         similar.artist_info(artist)
+        lastfm.top_tracks(artist, limit=50)
     except Exception:  # noqa: BLE001 - tags are decoration
         pass
     if any((a or {}).get("kind") not in (None, "none") for a in answers.values()):
@@ -128,6 +132,12 @@ def warm_release(artist, title, mbid=None):
 
 
 def _run():
+    # What the For you ranking reads: your Last.fm plays, and critic scores.
+    try:
+        lastfm.top_artists("overall", 1000)
+        critics.scores()
+    except Exception:  # noqa: BLE001 - the ranking works without them
+        pass
     todo = releases()
     _set(running=True, done=0, total=len(todo), current="", playable=0,
          fallback=0, silent=0, message="")

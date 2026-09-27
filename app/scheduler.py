@@ -9,7 +9,8 @@ re-read from settings each tick so changes take effect without a restart:
 import threading
 import time
 
-from . import db, downloads, gaps, grabber, hype, plugins, prewarm, scans, tracker
+from . import (critics, db, digest, downloads, gaps, grabber, hype, plugins,
+               prewarm, scans, tracker, wishlist)
 # Importing the discovery package registers its plugins with the registry.
 from .plugins import discovery as _discovery  # noqa: F401
 
@@ -39,6 +40,12 @@ _tasks = {
                   "unit": "minutes", "default": 1, "last": 0.0},
     "tracklists": {"label": "Fetch tracklists for the incomplete check",
                    "setting": None, "unit": "minutes", "default": 1, "last": 0.0},
+    "wishlist": {"label": "Announce saved releases on their release day",
+                 "setting": None, "unit": "minutes", "default": 10, "last": 0.0},
+    # Weekly, at a set day and time (see digest.next_run).
+    "digest": {"label": "Send the weekly Discover digest", "setting": None,
+               "unit": "hours", "default": 168, "last": 0.0,
+               "enabled_setting": "discover_digest_enabled"},
     # Weekly rather than every N hours, so its own next-run is reported
     # separately (see hype.schedule_state).
     "hype_playlist": {"label": "Rebuild the Get Hyped playlist",
@@ -71,13 +78,20 @@ def get_tasks():
         if enabled_setting:
             active = (db.get_setting(enabled_setting) or "false").strip().lower() == "true"
         last = task["last"] or None
+        next_run = (last + interval) if last else (now + interval)
+        # The weekly jobs run at a set day and time, not N hours after the last.
+        slot = {"digest": digest.next_run, "hype_playlist": hype.next_run}.get(key)
+        if slot:
+            when = slot()
+            if when:
+                next_run = when.timestamp()
         out.append({
             "key": key,
             "label": task["label"],
             "active": active,
             "interval_seconds": int(interval),
             "last_run": last,
-            "next_run": (last + interval) if last else (now + interval),
+            "next_run": next_run,
         })
     return out
 
@@ -104,6 +118,7 @@ def _loop():
     # by a big purge shouldn't stay that way until the process has run 24h.
     last_compact = 0.0
     last_autograb = 0.0
+    last_wishlist = 0.0
     # Don't scrape Discover the instant we boot; the page fills it on demand and
     # the scheduler keeps it fresh on the configured cadence after that.
     last_discover = time.time()
@@ -136,6 +151,8 @@ def _loop():
                     plugin.fetch(force=True)
                 except Exception:  # noqa: BLE001 - never let the scheduler thread die
                     pass
+            # The critic scores the feed is ranked with, on the same cadence.
+            critics.refresh_async()
 
         # Look up what this month's releases play from, so play is instant.
         # Its own thread: a first run is minutes of lookups, and the jobs
@@ -194,6 +211,22 @@ def _loop():
                 _ran("compact")
             except Exception:  # noqa: BLE001 - never let the scheduler thread die
                 pass
+
+        # Saved releases that came out: remind, and grab when that's on.
+        if now - last_wishlist >= 600:
+            last_wishlist = now
+            try:
+                wishlist.run_due_async()
+                _ran("wishlist")
+            except Exception:  # noqa: BLE001 - never let the scheduler thread die
+                pass
+
+        # The weekly Discover digest, when it's on and its slot has passed.
+        try:
+            if digest.run_if_due():
+                _ran("digest")
+        except Exception:  # noqa: BLE001 - never let the scheduler thread die
+            pass
 
         # The weekly "Get Hyped" playlist, when it's switched on and its slot
         # has passed. The function decides; this only asks.

@@ -2,13 +2,48 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Link as RouterLink } from "react-router-dom";
 import AudioPlayer, { RHAP_UI } from "react-h5-audio-player";
 import "react-h5-audio-player/lib/styles.css";
-import { LuLoaderCircle, LuPause, LuPlay, LuShuffle, LuX } from "react-icons/lu";
+import {
+  LuBookmark,
+  LuChevronsRight,
+  LuListMusic,
+  LuLoaderCircle,
+  LuPause,
+  LuPlay,
+  LuShuffle,
+  LuThumbsDown,
+  LuThumbsUp,
+  LuUserPlus,
+  LuVolume2,
+  LuX,
+} from "react-icons/lu";
 import { toast } from "sonner";
-import { api } from "../api";
+import { api, art } from "../api";
 import { ArtistLink } from "./ArtistLink";
 import { ServiceIcon } from "./ServiceIcon";
 import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import { emit } from "../lib/events";
+import { continueOn, heardKey, heardReleases } from "../lib/playPrefs";
 import { cn } from "../lib/utils";
+
+/** The record a track was played for: what thumbs up/down and "heard" act on. */
+export type ReleaseRef = {
+  artist: string;
+  album?: string | null;
+  mbid?: string | null;
+  date?: string | null;
+  image?: string | null;
+};
+
+// Played this long, a release counts as heard.
+const HEARD_AFTER_S = 15;
 
 // One playable track: where the audio comes from plus what to call it. `note`
 // is the line under the title -- "from Navidrome", "30-second sample".
@@ -29,17 +64,26 @@ export type PreviewTrack = {
   group?: string | null;
   /** A line about the whole queue: why these are the tracks playing. */
   queueNote?: string | null;
+  /** Cover art, for the lock screen. */
+  image?: string | null;
+  /** The release this was played for (Discover and the lists like it). */
+  release?: ReleaseRef | null;
   src: string | null | undefined;
 };
 
 /**
  * What plays once a queue runs out: the next queue, and what follows that.
- * Resolves null when there's nothing more (or continuing was switched off).
+ * `load` resolves null when there's nothing more, or when continuing is
+ * switched off and the person didn't ask (`asked`) for the next one.
  */
-export type QueueContinuation = () => Promise<{
-  queue: PreviewTrack[];
-  next: QueueContinuation | null;
-} | null>;
+export type QueueContinuation = {
+  /** The row expected next, for the queue view. */
+  label?: string | null;
+  load: (asked?: boolean) => Promise<{
+    queue: PreviewTrack[];
+    next: QueueContinuation | null;
+  } | null>;
+};
 
 type PlayerState = {
   current: PreviewTrack | null;
@@ -159,6 +203,9 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
   // is only ever called, never rendered -- `hasNext` is the rendered half.
   const nextQueue = useRef<QueueContinuation | null>(null);
   const [hasNext, setHasNext] = useState(false);
+  const [nextLabel, setNextLabel] = useState<string | null>(null);
+  // Releases already reported heard this session.
+  const reported = useRef<Set<string>>(new Set());
   // Fetching the next queue. The token drops an answer that lands after the
   // person has picked something else to play.
   const [advancing, setAdvancing] = useState(false);
@@ -220,6 +267,7 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
       forgetResolved();
       nextQueue.current = then;
       setHasNext(!!then);
+      setNextLabel(then?.label ?? null);
     },
     [forgetResolved, shuffle],
   );
@@ -246,29 +294,31 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
     [load],
   );
 
-  // The queue ran out (or next was pressed on its last track): move on to
-  // whatever the list says comes after it, if anything does.
-  const advance = useCallback(() => {
+  // The queue ran out, or the person asked for the next one (`asked`): move on
+  // to whatever the list says comes after it, if anything does.
+  const advance = useCallback((asked = false) => {
     const then = nextQueue.current;
-    if (!then) {
-      setPlaying(false);
-      return;
-    }
+    // A queue that ran out with continuing off stays done -- but keeps its
+    // place in the list, for a "next artist" pressed later.
+    if (!then || (!asked && !continueOn())) return;
     const token = ++advanceToken.current;
     setAdvancing(true);
-    then()
+    then
+      .load(asked)
       .then((found) => {
         if (token !== advanceToken.current) return;
         if (!found || !found.queue.length) {
+          // Nothing further down the list plays.
+          if (asked) toast.info("Nothing further down the list to play.");
           nextQueue.current = null;
           setHasNext(false);
-          setPlaying(false);
+          setNextLabel(null);
           return;
         }
         load(found.queue, 0, found.next);
       })
       .catch(() => {
-        if (token === advanceToken.current) setPlaying(false);
+        if (token === advanceToken.current) toast.error("Could not load the next one.");
       })
       .finally(() => {
         if (token === advanceToken.current) setAdvancing(false);
@@ -351,12 +401,187 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
     [order.length, forgetResolved],
   );
 
+  // Next track, or at the end of the queue the next row of the list.
+  const goNext = useCallback(
+    (asked = true) => {
+      if (pos + 1 < order.length) step(1);
+      else advance(asked);
+    },
+    [pos, order.length, step, advance],
+  );
+
+  const playPause = useCallback(() => {
+    const el = ref.current?.audio?.current;
+    if (!el) return;
+    if (el.paused) el.play().catch(() => setPlaying(false));
+    else el.pause();
+  }, []);
+
+  // Jump to a track from the queue view.
+  const jump = useCallback(
+    (to: number) => {
+      if (to === pos) return;
+      forgetResolved();
+      setPos(to);
+    },
+    [pos, forgetResolved],
+  );
+
+  // Played long enough (or to the end): the release counts as heard -- its
+  // Discover row dims, and the walk down the list skips it next time.
+  const reportHeard = useCallback(
+    (force = false) => {
+      const rel = current?.release;
+      if (!rel?.artist) return;
+      const key = heardKey(rel.artist, rel.album);
+      if (reported.current.has(key)) return;
+      const el = ref.current?.audio?.current;
+      if (!force && (!el || el.currentTime < HEARD_AFTER_S)) return;
+      reported.current.add(key);
+      heardReleases.add(key);
+      api.markHeard(rel.artist, rel.album).catch(() => {});
+      emit("heard", { artist: rel.artist, album: rel.album, heard: true });
+    },
+    [current],
+  );
+
+  // Thumbs up: keep it, one way or the other.
+  function saveRelease(rel: ReleaseRef) {
+    if (!rel.album) return;
+    api
+      .wishlistAdd({ artist: rel.artist, album: rel.album, mbid: rel.mbid,
+                     release_date: rel.date, image: rel.image })
+      .then((r) => {
+        if (r.error) throw new Error(r.error);
+        toast.success(`Saved "${rel.album}" for later`);
+        emit("saved", { artist: rel.artist, album: rel.album, saved: true });
+      })
+      .catch(() => toast.error("Could not save it."));
+  }
+  function followArtist(rel: ReleaseRef) {
+    api
+      .trackByName(rel.artist, "subscribed")
+      .then((r: any) => {
+        if (r?.error) throw new Error(r.error);
+        toast.success(`Following ${rel.artist}`);
+        emit("followed", { artist: rel.artist, album: rel.album, following: true });
+      })
+      .catch(() => toast.error(`Could not follow ${rel.artist}.`));
+  }
+  // Thumbs down: never show this release on Discover again, and move on.
+  function dislike(rel: ReleaseRef) {
+    if (!rel.album) return;
+    const album = rel.album;
+    api
+      .addDiscoverIgnore(rel.artist, album)
+      .then((r: any) => {
+        emit("ignored", { artist: rel.artist, album });
+        const rule = (r?.ignores ?? []).find(
+          (i: { artist: string; album: string | null }) =>
+            i.artist.toLowerCase() === rel.artist.toLowerCase() &&
+            (i.album || "").toLowerCase() === album.toLowerCase(),
+        );
+        toast(`Ignored "${album}"`, {
+          action: rule
+            ? {
+                label: "Undo",
+                onClick: () => {
+                  api.removeDiscoverIgnore(rule.id).then(() =>
+                    emit("unignored", { artist: rel.artist, album }),
+                  );
+                },
+              }
+            : undefined,
+        });
+        if (nextQueue.current) advance(true);
+        else ref.current?.audio?.current?.pause();
+      })
+      .catch(() => toast.error("Could not ignore it."));
+  }
+
+  // The lock screen, the headphones' buttons, the media keys.
+  useEffect(() => {
+    const session = typeof navigator !== "undefined" ? navigator.mediaSession : undefined;
+    if (!session) return;
+    if (!current) {
+      session.metadata = null;
+      return;
+    }
+    const cover = current.image || current.release?.image;
+    try {
+      session.metadata = new MediaMetadata({
+        title: current.title,
+        artist: current.artist ?? "",
+        album: current.album ?? "",
+        artwork: cover ? [{ src: new URL(art(cover), window.location.origin).href }] : [],
+      });
+    } catch {
+      /* an older browser without MediaMetadata: the buttons still work */
+    }
+  }, [current]);
+  useEffect(() => {
+    const session = typeof navigator !== "undefined" ? navigator.mediaSession : undefined;
+    if (!session) return;
+    session.playbackState = !current ? "none" : playing ? "playing" : "paused";
+  }, [current, playing]);
+  useEffect(() => {
+    const session = typeof navigator !== "undefined" ? navigator.mediaSession : undefined;
+    if (!session) return;
+    const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
+      ["play", () => { ref.current?.audio?.current?.play().catch(() => {}); }],
+      ["pause", () => ref.current?.audio?.current?.pause()],
+      ["previoustrack", () => step(-1)],
+      ["nexttrack", () => goNext(true)],
+    ];
+    for (const [action, handler] of handlers) {
+      try { session.setActionHandler(action, handler); } catch { /* unsupported action */ }
+    }
+    return () => {
+      for (const [action] of handlers) {
+        try { session.setActionHandler(action, null); } catch { /* unsupported action */ }
+      }
+    };
+  }, [step, goNext]);
+
+  // Keyboard: space plays/pauses, n / p next / previous track, shift+N the
+  // next artist. Not while typing, and not on a focused control (it has its
+  // own meaning for space there).
+  useEffect(() => {
+    if (!current) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.isContentEditable ||
+          /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) ||
+          target.closest("[role=dialog], [role=menu], [role=listbox], .rhap_container"))
+      ) {
+        return;
+      }
+      if (e.key === " ") {
+        if (target && /^(BUTTON|A)$/.test(target.tagName)) return;
+        e.preventDefault();
+        playPause();
+      } else if (e.key === "n") {
+        goNext(true);
+      } else if (e.key === "p") {
+        step(-1);
+      } else if (e.key === "N" && nextQueue.current) {
+        advance(true);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [current, goNext, step, advance, playPause]);
+
   const close = useCallback(() => {
     ref.current?.audio?.current?.pause();
     advanceToken.current += 1;
     setAdvancing(false);
     nextQueue.current = null;
     setHasNext(false);
+    setNextLabel(null);
     setQueue([]);
     setOrder([]);
     setPos(0);
@@ -512,7 +737,12 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
               }}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
-              onEnded={() => (pos + 1 < order.length ? step(1) : advance())}
+              listenInterval={3000}
+              onListen={() => reportHeard()}
+              onEnded={() => {
+                reportHeard(true);
+                goNext(false);
+              }}
               onPlayError={() => setPlaying(false)}
               onError={() => {
                 // No library copy and no sample: say so rather than sitting
@@ -520,12 +750,9 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
                 setPlaying(false);
                 toast.error(`No audio available for ${current.title}.`);
                 // A list that keeps going shouldn't stall on one dead track.
-                if (hasNext) {
-                  if (pos + 1 < order.length) step(1);
-                  else advance();
-                }
+                if (hasNext) goNext(false);
               }}
-              onClickNext={() => (pos + 1 < order.length ? step(1) : advance())}
+              onClickNext={() => goNext(true)}
               onClickPrevious={() => step(-1)}
               className="smt-audio-player"
             />
@@ -542,6 +769,90 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
               >
                 <LuShuffle />
               </Button>
+            )}
+            {/* What's queued: this release's tracks, then the row after it. */}
+            {(order.length > 1 || nextLabel) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="icon-xs" variant="ghost" aria-label="Queue" title="Queue">
+                    <LuListMusic />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="end" className="max-h-80 w-72 overflow-y-auto">
+                  <DropdownMenuLabel className="truncate">
+                    {current.release?.album || current.album || current.artist || "Queue"}
+                  </DropdownMenuLabel>
+                  {order.map((at, i) => (
+                    <DropdownMenuItem
+                      key={i}
+                      onSelect={() => jump(i)}
+                      className={i === pos ? "font-semibold" : undefined}
+                    >
+                      <span className="w-5 flex-none text-right text-xs text-muted-foreground">{i + 1}</span>
+                      <span className="truncate">{queue[at]?.title}</span>
+                      {i === pos && playing && <LuVolume2 aria-label="playing" className="ml-auto" />}
+                    </DropdownMenuItem>
+                  ))}
+                  {nextLabel && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={() => advance(true)}>
+                        <LuChevronsRight />
+                        <span className="truncate">
+                          {continueOn() ? "Then: " : "Next artist: "}
+                          {nextLabel}
+                        </span>
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {hasNext && (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Next artist"
+                title={nextLabel ? `Next artist: ${nextLabel} (shift+N)` : "Next artist (shift+N)"}
+                disabled={advancing}
+                onClick={() => advance(true)}
+              >
+                <LuChevronsRight />
+              </Button>
+            )}
+            {current.release && (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="icon-xs" variant="ghost" aria-label="I like this" title="I like this">
+                      <LuThumbsUp />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="end">
+                    {current.release.album && (
+                      <DropdownMenuItem onSelect={() => saveRelease(current.release!)}>
+                        <LuBookmark />
+                        <span className="truncate">Save "{current.release.album}" for later</span>
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onSelect={() => followArtist(current.release!)}>
+                      <LuUserPlus />
+                      <span className="truncate">Follow {current.release.artist}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {current.release.album && (
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label="Not for me"
+                    title={`Not for me: hide "${current.release.album}" from Discover`}
+                    onClick={() => dislike(current.release!)}
+                  >
+                    <LuThumbsDown />
+                  </Button>
+                )}
+              </>
             )}
             <Button size="icon-xs" variant="ghost" aria-label="Close player" onClick={close}>
               <LuX />
