@@ -7,6 +7,7 @@ import { api } from "../api";
 import { AlbumArt } from "../components/AlbumArt";
 import { ArtistLink } from "../components/ArtistLink";
 import { ArtZoom } from "../components/ArtZoom";
+import { useBackLink } from "../components/ScrollMemory";
 import { PreviewPlayButton, type PreviewTrack } from "../components/PreviewPlayer";
 import { AlbumExclusiveSparkles, UniqueSparkle } from "../components/UniqueSparkle";
 import type { AlbumExtras, AlbumTrack } from "../types";
@@ -96,12 +97,16 @@ export default function AlbumDetail() {
       .finally(() => setBusy(false));
   }
 
-  // Back link mirrors the old album_page logic.
-  let back = { to: "/upcoming", label: "Upcoming" };
-  if (origin === "discover") back = { to: "/discover", label: "Discover" };
-  else if (origin === "missing") back = { to: "/missing", label: "Missing" };
+  // Back link mirrors the old album_page logic. Going back to the page you
+  // came from is a history back, so it opens where you were scrolled to.
+  let fallback = { to: "/upcoming", label: "Upcoming" };
+  if (origin === "discover") fallback = { to: "/discover", label: "Discover" };
+  else if (origin === "missing") fallback = { to: "/missing", label: "Missing" };
+  else if (origin === "upcoming") fallback = { to: "/upcoming", label: "Upcoming" };
   else if (origin === "artist" && artistIdParam && /^\d+$/.test(artistIdParam))
-    back = { to: `/artist/${artistIdParam}`, label: artist };
+    fallback = { to: `/artist/${artistIdParam}`, label: artist };
+  // No "from" (a link in the player, say): back to wherever that was.
+  const back = useBackLink(fallback.to, fallback.label, !origin);
 
   const tracks: AlbumTrack[] = data?.tracks || [];
   // Every quality the library holds this release in, best first (one server
@@ -201,7 +206,7 @@ export default function AlbumDetail() {
   return (
     <div>
       <p className="mb-3">
-        <RouterLink to={back.to} className="inline-flex items-center gap-1.5 hover:underline">
+        <RouterLink to={back.to} onClick={back.onClick} className="inline-flex items-center gap-1.5 hover:underline">
           <LuArrowLeft aria-hidden />
           {back.label}
         </RouterLink>

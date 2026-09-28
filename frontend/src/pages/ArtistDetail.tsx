@@ -60,6 +60,7 @@ import {
 } from "../components/ui/dropdown-menu";
 import { Progress } from "../components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
+import { useBackLink } from "../components/ScrollMemory";
 
 const greenBadge = "bg-green-600/15 text-green-700 dark:text-green-400";
 
@@ -217,6 +218,9 @@ export default function ArtistDetail() {
   const { id: idParam } = useParams();
   const id = Number(idParam);
   const qc = useQueryClient();
+  // Back to the page you came from (Discover, an album, the artist list),
+  // where you left it; the artist list when you arrived from outside.
+  const back = useBackLink("/artists", "All artists", true);
 
   // An artist created by clicking their name is at the front of the refresh
   // queue, so poll until that pass stamps last_checked: the page fills itself
@@ -581,9 +585,9 @@ export default function ArtistDetail() {
   return (
     <div>
       <div className="mb-3 flex items-start justify-between gap-3">
-        <RouterLink to="/artists" className="inline-flex items-center gap-1.5 hover:underline">
+        <RouterLink to={back.to} onClick={back.onClick} className="inline-flex items-center gap-1.5 hover:underline">
           <LuArrowLeft aria-hidden />
-          All artists
+          {back.label}
         </RouterLink>
         {/* Everything that acts on this artist lives here rather than in four
             buttons scattered down the page. */}

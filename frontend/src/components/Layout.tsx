@@ -5,6 +5,7 @@ import { api } from "../api";
 import { ColorModeButton } from "./ui/color-mode";
 import { GradientDefs } from "./GradientDefs";
 import { PreviewPlayerProvider } from "./PreviewPlayer";
+import { ScrollMemory } from "./ScrollMemory";
 import { useNav } from "../nav";
 import { prefetchRoute, warmRoutes } from "../prefetch";
 
@@ -30,6 +31,7 @@ export default function Layout() {
     // The sample player lives above the outlet, so playback survives a page
     // change and every page can reach the same bar.
     <PreviewPlayerProvider>
+    <ScrollMemory />
     <GradientDefs />
     <div className="flex min-h-[100dvh] flex-col">
       <header className="sticky top-0 z-10 border-b bg-background px-4 py-2.5">
