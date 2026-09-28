@@ -325,6 +325,30 @@ DEFAULT_SETTINGS = {
     "lastfm_cookie": "",            # session cookie for scraping login-only Last.fm pages
     "discover_refresh_hours": "24", # how often the Discover scrape is refreshed
     "discover_enrich_workers": "8", # parallel threads enriching Discover releases (art/genres)
+    # The newer Discover sources are opt-in: switched on under Settings >
+    # Discovery. ListenBrainz alone lists thousands of records a fortnight.
+    "discover_listenbrainz_enabled": "false",
+    "discover_listenbrainz_user": "",
+    "discover_listenbrainz_tags": "",
+    "discover_listenbrainz_days": "14",
+    "discover_librarynew_enabled": "false",
+    "discover_librarynew_days": "30",
+    "discover_kexp_enabled": "false",
+    "discover_kexp_days": "7",
+    "discover_kexp_months": "3",
+    "discover_kexp_min_plays": "3",
+    "discover_hypem_enabled": "false",
+    "discover_hypem_months": "6",
+    "discover_allmusic_enabled": "false",
+    "discover_anydecentmusic_enabled": "false",
+    "discover_pitchfork_enabled": "false",
+    "discover_stereogum_enabled": "false",
+    "discover_consequence_enabled": "false",
+    "discover_paste_enabled": "false",
+    "discover_nme_enabled": "false",
+    "discover_diy_enabled": "false",
+    "discover_thequietus_enabled": "false",
+    "discover_brooklynvegan_enabled": "false",
     # Look up ahead of time what the month's Discover and Upcoming releases
     # play from (see app/prewarm.py), so pressing play doesn't wait on it.
     "prewarm_audio_enabled": "true",
@@ -607,7 +631,10 @@ def _migrate(conn):
 
 
 # The discovery sources that exist, so cached rows from any other can go.
-_DISCOVERY_SOURCES = ("lastfm", "metacritic", "aoty", "iing")
+_DISCOVERY_SOURCES = ("lastfm", "metacritic", "aoty", "iing", "allmusic", "listenbrainz",
+                      "librarynew", "kexp", "hypem", "anydecentmusic", "pitchfork",
+                      "stereogum", "consequence", "paste", "nme", "diy", "thequietus",
+                      "brooklynvegan")
 
 
 def _remove_trackers(conn):

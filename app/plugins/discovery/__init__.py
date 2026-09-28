@@ -25,6 +25,8 @@ class DiscoveryPlugin(Plugin):
     """
 
     kind = "discovery"
+    # Where it's listed in Settings: sources are grouped by what they are.
+    group = "Release calendars"
     # Settings key holding this source's on/off toggle (default-on string flag).
     enabled_setting = None
     # Field descriptors the settings UI renders when the plugin is enabled. Each:
@@ -58,6 +60,7 @@ class DiscoveryPlugin(Plugin):
         data = super().describe()
         fetched_at, items = db.get_discover_cache(self.key)
         data.update({
+            "group": self.group,
             "enabled": self.enabled(),
             "enabled_setting": self.enabled_setting,
             "configured": self.configured(),
@@ -89,6 +92,7 @@ ITEM_DEFAULTS = {
     "context": None,           # source flavor text (recommendation reason / note)
     "context_artists": [],     # artist names named in that flavor text
     "mbid": None,              # release-group MBID, if the source knows it
+    "posted": None,            # ISO date the source listed it (feeds, radio)
 }
 
 
@@ -114,3 +118,7 @@ def normalize_items(items):
 # Register the bundled sources (import side effect calls register()).
 from . import lastfm, metacritic  # noqa: E402,F401
 from . import albumoftheyear, indieisnotagenre  # noqa: E402,F401
+from . import allmusic, listenbrainz, librarynew  # noqa: E402,F401
+from . import kexp, hypem  # noqa: E402,F401
+from . import anydecentmusic, pitchfork, stereogum, consequence, paste  # noqa: E402,F401
+from . import nme, diy, thequietus, brooklynvegan  # noqa: E402,F401

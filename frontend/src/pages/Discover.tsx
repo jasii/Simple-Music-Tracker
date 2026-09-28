@@ -90,7 +90,6 @@ const SRC_BADGE: Record<string, string> = {
   aoty: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
   iing: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
 };
-const srcBadge = (key?: string) => SRC_BADGE[key as string] ?? "bg-muted text-muted-foreground";
 // Calendar day-dot colors per source.
 const SRC_DOT: Record<string, string> = {
   lastfm: "bg-red-500",
@@ -98,6 +97,30 @@ const SRC_DOT: Record<string, string> = {
   aoty: "bg-blue-500",
   iing: "bg-emerald-500",
 };
+// Every other source gets one of these, the same one each time.
+const PALETTE: [string, string][] = [
+  ["bg-violet-500/15 text-violet-700 dark:text-violet-400", "bg-violet-500"],
+  ["bg-orange-500/15 text-orange-700 dark:text-orange-400", "bg-orange-500"],
+  ["bg-cyan-500/15 text-cyan-700 dark:text-cyan-400", "bg-cyan-500"],
+  ["bg-pink-500/15 text-pink-700 dark:text-pink-400", "bg-pink-500"],
+  ["bg-lime-500/15 text-lime-700 dark:text-lime-400", "bg-lime-500"],
+  ["bg-indigo-500/15 text-indigo-700 dark:text-indigo-400", "bg-indigo-500"],
+  ["bg-teal-500/15 text-teal-700 dark:text-teal-400", "bg-teal-500"],
+  ["bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-400", "bg-fuchsia-500"],
+  ["bg-amber-500/15 text-amber-700 dark:text-amber-400", "bg-amber-500"],
+  ["bg-sky-500/15 text-sky-700 dark:text-sky-400", "bg-sky-500"],
+  ["bg-rose-500/15 text-rose-700 dark:text-rose-400", "bg-rose-500"],
+  ["bg-green-500/15 text-green-700 dark:text-green-400", "bg-green-500"],
+];
+function paletteFor(key: string): [string, string] {
+  let hash = 0;
+  for (const ch of key) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return PALETTE[hash % PALETTE.length]!;
+}
+const srcBadge = (key?: string) =>
+  SRC_BADGE[key as string] ?? (key ? paletteFor(key)[0] : "bg-muted text-muted-foreground");
+const srcDot = (key?: string) =>
+  SRC_DOT[key as string] ?? (key ? paletteFor(key)[1] : "bg-foreground");
 
 function itemSources(r: DiscoverItem): DiscoverSourceTag[] {
   return r.sources && r.sources.length ? r.sources : [{ key: r.source, label: r.source_label }];
@@ -777,7 +800,7 @@ export default function Discover() {
               itemDots={(r) =>
                 itemSources(r)
                   .filter((s) => !hidden.has(s.key as string))
-                  .map((s) => SRC_DOT[s.key as string] ?? "bg-foreground")
+                  .map((s) => srcDot(s.key as string))
               }
               renderEvent={(r, k) => <CalEvent key={k} r={r} hidden={hidden} />}
             />
@@ -1775,7 +1798,7 @@ function CalEvent({ r, hidden }: { r: DiscoverItem; hidden: Set<string> }) {
   const inner = (
     <span className="flex items-center gap-2">
       {srcs.map((s) => (
-        <span key={s.key} className={"size-2 shrink-0 rounded-full " + (SRC_DOT[s.key as string] ?? "bg-foreground")} />
+        <span key={s.key} className={"size-2 shrink-0 rounded-full " + srcDot(s.key as string)} />
       ))}
       <span className="truncate">{label}</span>
     </span>

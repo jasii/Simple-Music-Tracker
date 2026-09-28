@@ -1058,6 +1058,25 @@ export default function Settings() {
 }
 
 
+// Discover sources are listed by what they are, in this order.
+const DISCOVERY_GROUP_ORDER = ["Release calendars", "Radio and blogs", "Critics and reviews"];
+const DISCOVERY_GROUP_NOTES: Record<string, string> = {
+  "Release calendars": "What's coming out, and what's just out.",
+  "Radio and blogs": "What a station is playing and blogs are posting now.",
+  "Critics and reviews": "Records the critics are reviewing, and the ones being announced.",
+};
+
+function groupDiscovery(plugins: PluginInfo[]): [string, PluginInfo[]][] {
+  const groups = new Map<string, PluginInfo[]>();
+  for (const name of DISCOVERY_GROUP_ORDER) groups.set(name, []);
+  for (const p of plugins) {
+    const name = p.group || DISCOVERY_GROUP_ORDER[0]!;
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name)!.push(p);
+  }
+  return Array.from(groups.entries()).filter(([, list]) => list.length > 0);
+}
+
 function PluginsTab({
   show,
   get,
@@ -1132,7 +1151,11 @@ function PluginsTab({
       ) : plugins.length === 0 ? (
         <p className="text-muted-foreground">No plugins available.</p>
       ) : (
-        plugins.map((p) => {
+        groupDiscovery(plugins).map(([group, list]) => (
+          <div key={group}>
+            <SubHeading note={DISCOVERY_GROUP_NOTES[group]}>{group}</SubHeading>
+            <div className="mt-3" />
+        {list.map((p) => {
           const on = isOn(p);
           return (
             <Section key={p.key}>
@@ -1198,7 +1221,9 @@ function PluginsTab({
               {on && <PluginFields fields={p.config_fields} get={get} set={set} />}
             </Section>
           );
-        })
+        })}
+          </div>
+        ))
       )}
       <SimilarScanSection />
       </>

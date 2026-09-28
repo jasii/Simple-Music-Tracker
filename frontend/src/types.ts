@@ -520,6 +520,8 @@ export interface PluginInfo {
   configured: boolean;
   config_fields: PluginConfigField[];
   has_test: boolean;
+  // Discovery plugins: which list they're under in Settings.
+  group?: string;
   // Present for refreshable (discovery) plugins.
   refreshable?: boolean;
   last_scraped?: number | null; // epoch seconds, or null if never scraped

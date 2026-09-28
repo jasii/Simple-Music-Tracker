@@ -67,6 +67,22 @@ can be switched on or off:
 - **Album of the Year** upcoming releases (behind Cloudflare: paste a clearance
   cookie, or run **FlareSolverr** to solve the challenge automatically).
 - **Indie Is Not A Genre** new and upcoming releases.
+- **AllMusic** featured new releases each week, with ratings and Editors'
+  Choices.
+- **ListenBrainz** fresh releases (everything new in MusicBrainz), kept to
+  artists similar to yours, tags you choose, or the picks for your
+  ListenBrainz account.
+- **New from your library:** new releases by artists you own but don't
+  follow, from the same ListenBrainz list.
+- **KEXP** radio plays: new records the station is airing and how often.
+- **Hype Machine:** what music blogs are posting now.
+- **Reviews and announcements** from **Pitchfork**, **Stereogum**,
+  **Consequence**, **Paste**, **NME**, **DIY**, **The Quietus** and
+  **BrooklynVegan** (their RSS feeds), and **AnyDecentMusic?** critic
+  averages.
+
+The sources from AllMusic down are off until you switch them on under
+Settings > Discovery.
 - **Similar artists**, gathered from Last.fm, and **Your Last.fm:** the
   artists you play most that aren't in your library.
 
@@ -300,7 +316,7 @@ configured under Settings. Adding a service means adding one file.
 | Kind | Bundled |
 | ---- | ------- |
 | Library | Music folder, Navidrome / Subsonic, Plex |
-| Discovery | Last.fm, Metacritic, Album of the Year, Indie Is Not A Genre |
+| Discovery | Last.fm, Metacritic, Album of the Year, Indie Is Not A Genre, AllMusic, ListenBrainz, New from your library, KEXP, Hype Machine, AnyDecentMusic?, Pitchfork, Stereogum, Consequence, Paste, NME, DIY, The Quietus, BrooklynVegan |
 | Metadata | Last.fm, Deezer, iTunes, Cover Art Archive, your own release covers |
 | Download clients | slskd (Soulseek) |
 | Notifications | ntfy, Gotify, Discord |

@@ -361,6 +361,44 @@ def similar_artists(name, limit=30, max_age=db.FROM_SETTINGS):
 _TRACKS_FETCHED = 50
 
 
+def track_album(artist, track, max_age=db.FROM_SETTINGS):
+    """The album a track is on, per Last.fm: {"album", "image_url", "listeners"}.
+
+    For sources that name a song rather than a record (Hype Machine), so the
+    row can open and play the album it's from. ``listeners`` says how
+    established the song is (a new one has few). {} when Last.fm doesn't know it.
+    """
+    api_key = db.get_setting("lastfm_api_key")
+    if not api_key or not artist or not track:
+        return {}
+    cache_key = f"lftrackalbum2:{artist.strip().lower()}|{track.strip().lower()}"
+    cached = db.get_json_cache(cache_key, max_age=db.resolve_max_age(max_age, "hit"))
+    if cached is not None:
+        return cached
+    data = _lastfm_get({
+        "method": "track.getInfo",
+        "artist": artist,
+        "track": track,
+        "api_key": api_key,
+        "format": "json",
+        "autocorrect": 1,
+    })
+    if data is None:
+        return {}  # a failed call isn't worth remembering
+    info = data.get("track") or {}
+    album = info.get("album") or {}
+    out = {}
+    if info:
+        try:
+            listeners = int(info.get("listeners") or 0)
+        except (TypeError, ValueError):
+            listeners = 0
+        out = {"album": album.get("title"), "image_url": _best_image(album.get("image")),
+               "listeners": listeners}
+    db.set_json_cache(cache_key, out)
+    return out
+
+
 def top_tracks(name, limit=5, max_age=db.FROM_SETTINGS):
     """The artist's most-played tracks: [{name, url, playcount, mbid}].
 
