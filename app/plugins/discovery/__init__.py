@@ -93,6 +93,9 @@ ITEM_DEFAULTS = {
     "context_artists": [],     # artist names named in that flavor text
     "mbid": None,              # release-group MBID, if the source knows it
     "posted": None,            # ISO date the source listed it (feeds, radio)
+    # Songs off it the source named (aired, posted), most played first; each
+    # {"title"}, plus "hypem" (an item id) when Hype Machine streams it.
+    "songs": [],
 }
 
 
@@ -107,6 +110,9 @@ def normalize_item(raw):
         item["genres"] = []
     if not isinstance(item["context_artists"], list):
         item["context_artists"] = []
+    if not isinstance(item["songs"], list):
+        item["songs"] = []
+    item["songs"] = [s for s in item["songs"] if isinstance(s, dict) and s.get("title")]
     return item
 
 

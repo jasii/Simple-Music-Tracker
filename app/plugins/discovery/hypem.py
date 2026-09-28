@@ -132,6 +132,10 @@ def scrape():
             "posted": posted,
             "image": image or t.get("thumb_url_large"),
             "context": why,
+            # The song the blog posted, which Hype Machine streams itself
+            # (see /api/hypem-stream): the one thing sure to play for a
+            # record no catalogue carries yet.
+            "songs": [{"title": song, "hypem": t.get("itemid")}],
         })
     return items
 

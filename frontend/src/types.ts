@@ -111,6 +111,11 @@ export interface DiscoverSourceTag {
   label: string | null;
 }
 
+export interface DiscoverSong {
+  title: string;
+  hypem?: string | null;
+}
+
 export interface DiscoverItem {
   artist: string | null;
   album: string | null;
@@ -143,6 +148,9 @@ export interface DiscoverItem {
   saved?: boolean;
   // When a source first listed it (epoch seconds), for "new since last visit".
   first_seen?: number | null;
+  // Songs off it the source named (aired on KEXP, posted on a blog), most
+  // played first. `hypem` is Hype Machine's id for a song it streams itself.
+  songs?: DiscoverSong[];
   // Metascore, when Metacritic has one, and its page.
   score?: number | null;
   score_url?: string | null;
@@ -803,6 +811,8 @@ export interface PrewarmState {
   playable: number;
   fallback: number;
   silent: number;
+  // New preview files saved this run.
+  saved?: number;
   message: string;
   started?: boolean;
   last?: {
@@ -811,7 +821,10 @@ export interface PrewarmState {
     playable: number;
     fallback: number;
     silent: number;
+    saved?: number;
   } | null;
+  // The saved preview audio on disk (app/savedaudio.py).
+  disk?: { count: number; bytes: number; dir: string; cap_bytes: number | null };
 }
 
 // One of the user's own search sites, shown beside every release's links.

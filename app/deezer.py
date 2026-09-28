@@ -15,6 +15,7 @@ from .preview import _paced_get
 
 SEARCH_ARTIST = "https://api.deezer.com/search/artist"
 SEARCH_ALBUM = "https://api.deezer.com/search/album"
+ALBUM_TRACKS = "https://api.deezer.com/album/{}/tracks"
 
 # How many photos to keep for the artwork picker.
 _MAX_IMAGES = 4
@@ -31,6 +32,10 @@ def _artist_key(name):
     return f"dzartist2:{(name or '').strip().lower()}"
 
 
+def _tracks_key(artist, title):
+    return f"dztracks1:{(artist or '').strip().lower()}|{(title or '').strip().lower()}"
+
+
 def _album_key(artist, title):
     return f"dzalbum2:{(artist or '').strip().lower()}|{(title or '').strip().lower()}"
 
@@ -38,7 +43,9 @@ def _album_key(artist, title):
 def _cached(key):
     """(hit, value): a stored answer, honouring the shorter TTL for a miss."""
     stored = db.get_json_cache(key, max_age=db.cache_max_age("hit"))
-    if stored:
+    # A stored miss ({"cover": null}, {"images": []}) is still a non-empty
+    # dict: it only counts under the miss TTL below, or it would never expire.
+    if stored and any(stored.values()):
         return True, stored
     if stored is not None and db.get_json_cache(
             key, max_age=db.cache_max_age("miss")) is not None:
@@ -61,7 +68,9 @@ def artist_images(name, cached_only=False):
     if cached_only:
         return []
 
-    data = _paced_get(SEARCH_ARTIST, {"q": name, "limit": 10}) or {}
+    data = _paced_get(SEARCH_ARTIST, {"q": name, "limit": 10})
+    if data is None:
+        return []  # Deezer didn't answer: not a miss worth remembering
     images = []
     for row in data.get("data") or []:
         if not names.same_name(name, row.get("name")):
@@ -91,8 +100,12 @@ def album_cover(artist, title):
     # still have to agree on artist *and* title -- a loose search for one album
     # happily returns a different artist's record with a similar name.
     cover = None
+    failed = False
     for query in (f'artist:"{artist}" album:"{title}"', f"{artist} {title}"):
-        data = _paced_get(SEARCH_ALBUM, {"q": query, "limit": 5}) or {}
+        data = _paced_get(SEARCH_ALBUM, {"q": query, "limit": 5})
+        if data is None:
+            failed = True
+            continue
         for row in data.get("data") or []:
             if not names.same_name(artist, (row.get("artist") or {}).get("name")):
                 continue
@@ -103,5 +116,50 @@ def album_cover(artist, title):
                 break
         if cover:
             break
-    db.set_json_cache(key, {"cover": cover})
+    if cover or not failed:
+        db.set_json_cache(key, {"cover": cover})
     return cover
+
+
+def album_tracks(artist, title):
+    """One release's tracklist from Deezer: [{name, duration, url}].
+
+    [] when Deezer hasn't got it, None when Deezer didn't answer. Found by
+    the same artist-and-title agreement as a cover; the search runs twice
+    for the same reason (the field query is too exact on its own).
+    """
+    if not artist or not title:
+        return []
+    key = _tracks_key(artist, title)
+    hit, stored = _cached(key)
+    if hit:
+        return (stored or {}).get("tracks") or []
+
+    album_id = None
+    failed = False
+    for query in (f'artist:"{artist}" album:"{title}"', f"{artist} {title}"):
+        data = _paced_get(SEARCH_ALBUM, {"q": query, "limit": 10})
+        if data is None:
+            failed = True
+            continue
+        for row in data.get("data") or []:
+            if (names.same_name(artist, (row.get("artist") or {}).get("name"))
+                    and names.same_name(title, row.get("title"))):
+                album_id = row.get("id")
+                break
+        if album_id:
+            break
+    if not album_id:
+        if failed:
+            return None
+        db.set_json_cache(key, {"tracks": []})
+        return []
+
+    data = _paced_get(ALBUM_TRACKS.format(int(album_id)), {"limit": 100})
+    if data is None:
+        return None
+    tracks = [{"name": row["title"], "duration": row.get("duration") or None,
+               "url": row.get("link")}
+              for row in data.get("data") or [] if row.get("title")]
+    db.set_json_cache(key, {"tracks": tracks})
+    return tracks

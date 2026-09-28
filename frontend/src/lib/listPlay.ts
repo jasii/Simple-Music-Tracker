@@ -5,7 +5,8 @@
 // them: it keeps going after you navigate away.
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { api } from "../api";
+import { api, hypemStream } from "../api";
+import type { DiscoverSong } from "../types";
 import {
   usePreviewPlayer,
   type PreviewTrack,
@@ -24,6 +25,8 @@ export type PlayRow = {
   date?: string | null;
   /** An artist rather than a record: play their top tracks. */
   topTracksOnly?: boolean;
+  /** Songs the source named (aired, posted), most played first. */
+  songs?: DiscoverSong[] | null;
 };
 
 // A release nobody has opened is resolved while you wait (its tracklist, then
@@ -34,15 +37,62 @@ const TOP_TRACKS = 10;
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
+// Loose title key, so "Sunday Bed (feat. X)" and "Sunday Bed" are one song.
+const songKey = (title: string) =>
+  title.toLowerCase().replace(/[([].*?[)\]]/g, "").replace(/[^\p{L}\p{N}]+/gu, "");
+
+function releaseRef(row: PlayRow) {
+  return { artist: row.artist, album: row.album, mbid: row.mbid, date: row.date, image: row.image };
+}
+
+// The songs a blog posted that Hype Machine streams whole: the one thing sure
+// to play for a record no catalogue has yet, so they go first.
+function postedSongs(row: PlayRow): PreviewTrack[] {
+  return (row.songs ?? [])
+    .filter((s) => s.hypem)
+    .map((s) => ({
+      title: s.title,
+      artist: row.artist,
+      artistId: row.artistId,
+      album: row.album,
+      note: "Hype Machine",
+      noteUrl: `https://hypem.com/track/${s.hypem}`,
+      noteIcon: null,
+      group: row.key,
+      image: row.image,
+      release: releaseRef(row),
+      src: hypemStream(s.hypem!, { artist: row.artist, title: s.title, album: row.album }),
+    }));
+}
+
+// Put the songs the source named ahead of the rest, most played first, and
+// drop any a posted song already covers.
+function namedFirst(titles: string[], row: PlayRow, posted: PreviewTrack[]): string[] {
+  const played = new Set(posted.map((t) => songKey(t.title)));
+  const rest = titles.filter((t) => !played.has(songKey(t)));
+  const named = (row.songs ?? []).map((s) => songKey(s.title));
+  const rank = (t: string) => {
+    const at = named.indexOf(songKey(t));
+    return at < 0 ? named.length : at;
+  };
+  return [...rest].sort((a, b) => rank(a) - rank(b));
+}
+
 function rowLabel(row: PlayRow): string {
   return row.album ? `${row.artist} - ${row.album}` : row.artist;
 }
 
-async function topTracks(row: PlayRow, queueNote: string | null): Promise<PreviewTrack[]> {
+async function topTracks(
+  row: PlayRow,
+  queueNote: string | null,
+  posted: PreviewTrack[] = [],
+): Promise<PreviewTrack[]> {
   const top = await api.artistTopTracksByName(row.artist, TOP_TRACKS).catch(() => null);
   const size = samplerSize();
-  const tracks = (top?.tracks ?? []).filter((t) => t.stream);
-  return (size ? tracks.slice(0, size) : tracks).map((t) => ({
+  const played = new Set(posted.map((t) => songKey(t.title)));
+  const tracks = (top?.tracks ?? []).filter((t) => t.stream && !played.has(songKey(t.name)));
+  const room = size ? Math.max(size - posted.length, 0) : tracks.length;
+  return [...posted, ...tracks.slice(0, room).map((t) => ({
     title: t.name,
     artist: row.artist,
     artistId: row.artistId,
@@ -54,9 +104,9 @@ async function topTracks(row: PlayRow, queueNote: string | null): Promise<Previe
     group: row.key,
     queueNote,
     image: row.image,
-    release: { artist: row.artist, album: row.album, mbid: row.mbid, date: row.date, image: row.image },
+    release: releaseRef(row),
     src: t.stream,
-  }));
+  }))];
 }
 
 /**
@@ -69,8 +119,9 @@ export async function rowQueue(
   onProgress?: (done: number, total: number) => void,
 ): Promise<PreviewTrack[]> {
   if (!row.artist) return [];
+  const posted = postedSongs(row);
   if (row.topTracksOnly || !row.album) {
-    return topTracks(row, row.topTracksOnly ? null : `Playing ${row.artist}'s top tracks`);
+    return topTracks(row, row.topTracksOnly ? null : `Playing ${row.artist}'s top tracks`, posted);
   }
   const album = row.album;
   const mbid = row.mbid || undefined;
@@ -89,10 +140,13 @@ export async function rowQueue(
   if (size) {
     // The most played first, then the rest in tracklist order.
     const ranked = (found.ranked ?? []).filter((t) => playable.includes(t));
-    playable = [...ranked, ...playable.filter((t) => !ranked.includes(t))].slice(0, size);
+    playable = [...ranked, ...playable.filter((t) => !ranked.includes(t))];
   }
+  // What the station aired or the blog posted comes before all of that.
+  playable = namedFirst(playable, row, posted);
+  if (size) playable = playable.slice(0, Math.max(size - posted.length, 0));
   if (playable.length) {
-    return playable.map((title) => {
+    return [...posted, ...playable.map((title) => {
       const t = found.tracks[title]!;
       return {
         title,
@@ -104,12 +158,16 @@ export async function rowQueue(
         noteIcon: t.icon ?? null,
         group: row.key,
         image: row.image,
-        release: { artist: row.artist, album, mbid: row.mbid, date: row.date, image: row.image },
+        release: releaseRef(row),
         src: t.stream,
       };
-    });
+    })];
   }
-  return topTracks(row, `No music found for "${album}", so playing ${row.artist}'s top tracks`);
+  return topTracks(
+    row,
+    `No music found for "${album}", so playing ${row.artist}'s top tracks`,
+    posted,
+  );
 }
 
 /** After row *index* of *rows*: the next row down that has anything to play. */

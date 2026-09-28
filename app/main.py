@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -53,6 +54,7 @@ from . import (
     prewarm,
     preview,
     quality,
+    savedaudio,
     scanner,
     scans,
     scheduler,
@@ -1006,6 +1008,32 @@ def api_track_source():
     ))
 
 
+_HYPEM_ID = re.compile(r"^[0-9a-z]{1,16}$")
+
+
+@app.route("/api/hypem-stream/<item_id>")
+def api_hypem_stream(item_id):
+    """A song a blog posted, as Hype Machine streams it: the whole track.
+
+    Hype Machine answers with a redirect to wherever the blog's file lives
+    (Bandcamp, a file host), signed fresh each time -- so this redirects to
+    it on every play rather than storing where it pointed, and saves the song
+    behind the play (see app/savedaudio.py). Params: artist, title, album --
+    what to name the saved file.
+    """
+    if not _HYPEM_ID.match(item_id or ""):
+        return jsonify({"error": "bad item id"}), 400
+    saved = savedaudio.find_hypem(item_id)
+    if saved:
+        return savedaudio.respond(saved)
+    artist = (request.args.get("artist") or "").strip()
+    title = (request.args.get("title") or "").strip()
+    if artist and title:
+        savedaudio.save_async(savedaudio.save_hypem, item_id, artist, title,
+                              (request.args.get("album") or "").strip() or None)
+    return redirect(f"https://hypem.com/serve/public/{item_id}")
+
+
 @app.route("/api/album/playable")
 def api_album_playable():
     """Which of a release's tracks can be played, and from where.
@@ -1052,8 +1080,14 @@ def api_track_stream():
             return librarytrack.respond(found, request.headers.get("Range"))
     except Exception:  # noqa: BLE001 - a sick library shouldn't kill playback
         pass
+    saved = savedaudio.find(artist, title)
+    if saved:
+        return savedaudio.respond(saved)
     sample = preview.for_track(artist, title)
     if sample:
+        # Kept behind the play, so the next one comes off the disk.
+        savedaudio.save_async(savedaudio.save, artist, title,
+                              (request.args.get("album") or "").strip() or None)
         return redirect(sample)
     # Nothing sells it: play the audio out of the video a source found, so it
     # goes through the same player as everything else (see app/videoaudio.py).
@@ -1230,17 +1264,27 @@ def top_tracks_playable(artist, limit):
     # The user's own copy beats a thirty-second sample, so ask the libraries
     # first and only look a sample up for what they haven't got.
     owned = librarytrack.markers(artist, [t["name"] for t in tracks])
+    # A sample already on disk needs no catalogue asked about it.
+    saved = {t["name"]: savedaudio.find(artist, t["name"])
+             for t in tracks if not owned.get(t["name"])}
     samples = preview.for_tracks(
-        artist, [t["name"] for t in tracks if not owned.get(t["name"])]
+        artist, [t["name"] for t in tracks
+                 if not owned.get(t["name"]) and not saved.get(t["name"])]
     )
     for track in tracks:
         mark = owned.get(track["name"]) or {}
+        on_disk = saved.get(track["name"])
         track["preview"] = samples.get(track["name"])
         track["library"] = mark.get("label")
         # Where that copy lives, so the player can credit it with a link.
         track["library_url"] = mark.get("url")
         track["library_icon"] = mark.get("icon")
-        if not mark and track["preview"]:
+        if on_disk:
+            track["preview"] = _track_stream_url(artist, track["name"])
+            track["library"] = on_disk.get("label")
+            track["library_url"] = on_disk.get("page_url")
+            track["library_icon"] = on_disk.get("icon")
+        elif not mark and track["preview"]:
             # Not ours: say which catalogue the sample came from instead.
             sample = preview.cached_details(artist, track["name"]) or {}
             track["library"] = sample.get("label")
@@ -1861,6 +1905,12 @@ def _merge_discover_items(items):
                 existing[field] = it[field]
         if not existing.get("genres") and it.get("genres"):
             existing["genres"] = it["genres"]
+        # Every song any source named, once each.
+        named = {(s.get("title") or "").lower() for s in existing.get("songs") or []}
+        for song in it.get("songs") or []:
+            if (song.get("title") or "").lower() not in named:
+                existing["songs"] = [*(existing.get("songs") or []), song]
+                named.add(song["title"].lower())
         # Keep the earliest known release date.
         nd = it.get("normalized_date")
         if nd and (not existing.get("normalized_date") or nd < existing["normalized_date"]):

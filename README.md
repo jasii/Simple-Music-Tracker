@@ -93,7 +93,12 @@ says so. Switch on **Continue to next artist** and it carries on down the list;
 the row playing is highlighted, and releases you've already heard are skipped.
 The audio for every release from this week to a month out, on Discover and
 Upcoming, is **looked up in the background** ahead of time (Settings >
-Discovery > Pre-load audio), so play starts at once.
+Discovery > Pre-load audio), so play starts at once. Every preview it finds,
+and every one you play, is **saved to disk** as `data/previews/<Artist>/<Artist>
+- <Title>.mp3` (all songs of each release or a set number, picked by a
+slider; 5 GB by default, least recently played go first), so it keeps
+playing after the catalogue's link has lapsed and the folder can be browsed in
+any music player. For a Hype Machine row that's the whole song the blog posted.
 
 - **For you:** sort the feed by how well each release fits you (similar to
   your artists, your Last.fm plays, the genres you collect, critic score, how

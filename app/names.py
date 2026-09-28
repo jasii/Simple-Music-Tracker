@@ -29,6 +29,12 @@ _EDITION_WORDS = frozenset({
 })
 
 
+def edition_noise(text):
+    """Is this only edition words and numbers? "2006 Remastered Version" is."""
+    words = tokens(text)
+    return bool(words) and all(w.isdigit() or w in _EDITION_WORDS for w in words)
+
+
 # Letters that stand in for Latin ones in a stylised name, and letters that
 # don't decompose to Latin on their own. Bands write themselves however they
 # like -- CHVRCHΞS, MØ, Sigur Rós -- and each service copies a different part

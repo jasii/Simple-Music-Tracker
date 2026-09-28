@@ -188,6 +188,24 @@ CREATE TABLE IF NOT EXISTS json_cache (
     payload     TEXT NOT NULL       -- arbitrary JSON value
 );
 
+-- Preview audio saved to disk (app/savedaudio.py), one row per file under
+-- data/previews. Keyed 'artist|title' lowercased, or 'hypem:<item id>' for a
+-- song a blog posted.
+CREATE TABLE IF NOT EXISTS saved_audio (
+    audio_key  TEXT PRIMARY KEY,
+    artist     TEXT NOT NULL,
+    title      TEXT NOT NULL,
+    album      TEXT,
+    source     TEXT,               -- 'itunes', 'deezer', 'hypem'
+    label      TEXT,               -- what the player credits it to
+    icon       TEXT,
+    page_url   TEXT,               -- the source's own page for the song
+    path       TEXT NOT NULL,      -- relative to the previews folder
+    size       INTEGER NOT NULL,
+    saved_at   REAL NOT NULL,
+    played_at  REAL
+);
+
 -- Manual matches between a library album and a MusicBrainz release group, for
 -- the pairs no amount of title normalising will agree on: linked = 1 says
 -- "these are the same record", linked = 0 says "they are not" and blocks the
@@ -352,6 +370,14 @@ DEFAULT_SETTINGS = {
     # Look up ahead of time what the month's Discover and Upcoming releases
     # play from (see app/prewarm.py), so pressing play doesn't wait on it.
     "prewarm_audio_enabled": "true",
+    # Keep the audio of every preview it finds on disk (data/previews), so it
+    # plays after the catalogue's link lapses. Least recently played go first
+    # past the cap (MB; 0 = no cap).
+    "save_preview_audio": "true",
+    "saved_audio_cap_mb": "5000",
+    # How many songs of each release the pre-load saves (the ones the source
+    # named first, then Last.fm's most played); 0 = every one with a preview.
+    "saved_audio_per_release": "0",
     "prewarm_audio_hours": "24",
     # Your own search sites, shown beside every release's links: a JSON list
     # of {"name", "url", "icon"} (see app/plugins/search).

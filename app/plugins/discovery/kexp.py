@@ -9,7 +9,8 @@ out in the last few months). A week of KEXP is well over a thousand records,
 most of them played once.
 """
 
-from collections import Counter
+import re
+from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 from ... import db
@@ -21,6 +22,13 @@ SOURCE = "kexp"
 # Enough pages for about a week of airplay at 200 plays each.
 _MAX_PAGES = 15
 _ROTATIONS = ("Heavy", "Medium", "Light", "R/N", "R")
+# A guest on the song, not an author of the record: "Bonobo feat. Joy Crookes"
+# is a Bonobo album, and no catalogue files it under the full credit.
+_GUEST = re.compile(r"\s+(?:feat|ft|featuring)\b\.?\s*\S.*$", re.I)
+
+
+def _album_artist(credit):
+    return _GUEST.sub("", credit or "").strip() or credit
 
 
 def _int_setting(key, default, low, high):
@@ -48,6 +56,9 @@ def scrape():
 
     counts = Counter()
     first = {}
+    # Which songs off each record the station played, and how often: what the
+    # play button starts with.
+    songs = defaultdict(Counter)
     for p in plays:
         if p.get("play_type") != "trackplay" or not p.get("artist") or not p.get("album"):
             continue
@@ -55,9 +66,11 @@ def scrape():
         rotation = p.get("rotation_status")
         if not (released and released >= recent) and rotation not in _ROTATIONS:
             continue
-        key = (p["artist"].lower(), p["album"].lower())
+        key = (_album_artist(p["artist"]).lower(), p["album"].lower())
         counts[key] += 1
         first.setdefault(key, p)
+        if p.get("song"):
+            songs[key][p["song"]] += 1
 
     items = []
     for key, p in first.items():
@@ -72,7 +85,7 @@ def scrape():
             why += " · local artist"
         released = (p.get("release_date") or "")[:10] or None
         items.append({
-            "artist": p["artist"],
+            "artist": _album_artist(p["artist"]),
             "album": p["album"],
             "release_date": released,
             "normalized_date": released,
@@ -80,6 +93,7 @@ def scrape():
             "image": p.get("image_uri") or p.get("thumbnail_uri"),
             "context": why,
             "mbid": p.get("release_group_id"),
+            "songs": [{"title": t} for t, _n in songs[key].most_common()],
         })
     # Most played first, so the cache holds the station's favourites up top.
     items.sort(key=lambda it: -counts[(it["artist"].lower(), it["album"].lower())])

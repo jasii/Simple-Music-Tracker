@@ -12,10 +12,14 @@ import hashlib
 import threading
 import time
 
-from . import db, librarytrack, videoaudio
+from . import db, librarytrack, preview, savedaudio, videoaudio
 
 # The map itself is cheap to rebuild from the per-track caches underneath it,
 # so how long it's read for is just store_keep_days like everything else.
+
+# A track that came up empty while a catalogue was rate limiting us is asked
+# again after this long, not after the week a real miss is trusted for.
+_RETRY_S = 15 * 60
 
 # release key -> Thread, so one release isn't resolved twice at once.
 _jobs = {}
@@ -38,7 +42,7 @@ def _fingerprint(titles):
     joined = "|".join([
         # Bumped when the name matching changes: an answer of "nothing has
         # this" is only as good as the rules that failed to find it.
-        "rules3",
+        "rules4",
         *titles,
         ",".join(p.key for p in registry.sources("track_preview")),
         ",".join(librarytrack.playback_order()),
@@ -68,6 +72,15 @@ def resolve_one(artist, title, page_url=None):
                 # So the player can credit the source, mark and all.
                 "source_url": found.get("page_url"),
                 "icon": plugin.icon_name(),
+                "stream": _track_stream_url(artist, title)}
+
+    # A sample saved before plays off the disk, whatever the catalogues say now.
+    saved = savedaudio.find(artist, title)
+    if saved:
+        return {"kind": "sample", "label": saved.get("label") or "saved",
+                "source": saved.get("source"),
+                "source_url": saved.get("page_url"),
+                "icon": saved.get("icon"),
                 "stream": _track_stream_url(artist, title)}
 
     for source in registry.sources("track_preview"):
@@ -110,9 +123,12 @@ def _run(artist, album, tracks, fingerprint):
             if not title:
                 continue
             try:
-                payload["tracks"][title] = resolve_one(artist, title, page_url)
+                answer = resolve_one(artist, title, page_url)
             except Exception:  # noqa: BLE001 - one bad track isn't the album
-                payload["tracks"][title] = {"kind": "none"}
+                answer = {"kind": "none"}
+            if answer.get("kind") == "none" and preview.throttled():
+                answer["retry"] = True
+            payload["tracks"][title] = answer
             # Written as it goes, so the page fills in row by row rather than
             # sitting empty until the last (slow) lookup finishes.
             _store(artist, album, payload)
@@ -133,6 +149,8 @@ def _stale(payload):
     """Is this map older than the window a remembered miss is trusted for?"""
     built = payload.get("built_at") or 0
     window = db.cache_max_age("miss")
+    if any((info or {}).get("retry") for info in (payload.get("tracks") or {}).values()):
+        window = min(window or _RETRY_S, _RETRY_S)
     if not window:
         return False
     return (time.time() - built) > window

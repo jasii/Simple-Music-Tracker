@@ -152,6 +152,7 @@ function toPlayRow(r: DiscoverItem): PlayRow {
     artistId: r.artist_id,
     image: r.image,
     date: r.normalized_date,
+    songs: r.songs,
   };
 }
 

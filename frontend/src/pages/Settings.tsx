@@ -23,6 +23,7 @@ import {
 import { api } from "../api";
 import type { NavConfig, PluginConfigField, PluginInfo, Settings as SettingsT } from "../types";
 import { Progress } from "../components/ui/progress";
+import { Slider } from "../components/ui/slider";
 import { Button } from "../components/ui/button";
 import {
   Accordion,
@@ -2517,6 +2518,9 @@ function Check({
   );
 }
 
+// The slider's far end: every song on the release (stored as 0).
+const PER_RELEASE_ALL = 11;
+
 // The background pre-load of this month's releases (app/prewarm.py): its
 // switch, how often it runs, and a button to run it now.
 function PrewarmSection({
@@ -2541,12 +2545,16 @@ function PrewarmSection({
   }
   const last = data?.last;
   const status = data?.running
-    ? `Pre-loading ${data.done}/${data.total}${data.current ? ` - ${data.current}` : ""}`
+    ? `Pre-loading ${data.done}/${data.total}${data.saved ? `, ${data.saved} saved` : ""}` +
+      (data.current ? ` - ${data.current}` : "")
     : data?.message ||
       (last
         ? `Last run ${timeAgo(last.finished_at)}: ${last.playable} releases play their own tracks, ` +
-          `${last.fallback} the artist's top tracks, ${last.silent} nothing yet.`
+          `${last.fallback} the artist's top tracks, ${last.silent} nothing yet` +
+          (last.saved ? `; ${last.saved} new previews saved.` : ".")
         : "Not run yet.");
+  const disk = data?.disk;
+  const perRelease = Number(get("saved_audio_per_release")) || 0;
   return (
     <Section>
       <Legend>Pre-load audio</Legend>
@@ -2573,6 +2581,50 @@ function PrewarmSection({
         onChange={(e) => set("prewarm_audio_hours", e.target.value)}
       />
       <Hint>Default 24. Releases already looked up are passed over, so a run after the first is quick.</Hint>
+      <Check
+        checked={get("save_preview_audio") !== "false"}
+        onChange={(c) => set("save_preview_audio", c ? "true" : "false")}
+      >
+        Save the preview audio to disk
+      </Check>
+      <Hint>
+        Every sample the pre-load finds, and every one you play, is kept as a file named
+        after the song (Artist / Artist - Title.mp3), so it plays after the catalogue's
+        link has lapsed -- and the folder works in any music player.
+        {disk && (
+          <>
+            {" "}Now {disk.count.toLocaleString()} files, {fmtBytes(disk.bytes)}
+            {disk.cap_bytes ? ` of ${fmtBytes(disk.cap_bytes)}` : ""}, in <code>{disk.dir}</code>.
+          </>
+        )}
+      </Hint>
+      <Label>Songs saved per release: {perRelease ? perRelease : "all"}</Label>
+      <Slider
+        className="my-2 max-w-sm"
+        min={1}
+        max={PER_RELEASE_ALL}
+        step={1}
+        value={[perRelease || PER_RELEASE_ALL]}
+        onValueChange={([n]) =>
+          set("saved_audio_per_release", n >= PER_RELEASE_ALL ? "0" : String(n))
+        }
+      />
+      <Hint>
+        The songs KEXP aired or a blog posted come first, then Last.fm's most played. All the
+        way right saves every song with a preview. Songs you play are always kept.
+      </Hint>
+      <Label htmlFor="saved_audio_cap_mb">Keep up to (MB)</Label>
+      <Input
+        id="saved_audio_cap_mb"
+        type="number"
+        min={0}
+        step={100}
+        value={get("saved_audio_cap_mb")}
+        onChange={(e) => set("saved_audio_cap_mb", e.target.value)}
+      />
+      <Hint>
+        Default 5000. Past it, the least recently played files go first. 0 keeps everything.
+      </Hint>
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="outline" disabled={busy} onClick={toggle}>
           {data?.running ? "Stop" : "Pre-load now"}

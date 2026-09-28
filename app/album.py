@@ -14,16 +14,10 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-import requests
-
-from . import db, exclusives, gaps, lastfm, metadata, musicbrainz, names
+from . import db, deezer, exclusives, gaps, lastfm, metadata, musicbrainz, names, preview
 from .plugins import metadata as metadata_plugins
 
 ITUNES_SEARCH = "https://itunes.apple.com/search"
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-)
 
 # Tracklists/previews/cover change rarely once a record exists; cache in the DB
 # (survives restarts) and only re-fetch when older than this.
@@ -41,23 +35,21 @@ def _norm(name):
 
 
 def _itunes_tracks(artist, album):
-    """Return iTunes song results for an album: list of {name, preview_url, duration, url}."""
-    try:
-        resp = requests.get(
-            ITUNES_SEARCH,
-            params={
-                "term": f"{artist} {album}",
-                "media": "music",
-                "entity": "song",
-                "limit": 50,
-            },
-            headers={"User-Agent": USER_AGENT},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
-    except (requests.RequestException, ValueError):
-        return []
+    """iTunes song results for an album: list of {name, preview_url, duration, url}.
+
+    None when iTunes didn't answer (it rate-limits hard), which is not the
+    same as not having the album. Paced and backed off with the sample
+    lookups, since it's the same service counting.
+    """
+    data = preview._paced_get(ITUNES_SEARCH, {
+        "term": f"{artist} {album}",
+        "media": "music",
+        "entity": "song",
+        "limit": 50,
+    })
+    if data is None:
+        return None
+    results = data.get("results") or []
 
     tracks = []
     for r in results:
@@ -265,7 +257,10 @@ def get_album_detail(artist, title, mbid=None, force=False):
     key = "album4:" + (artist or "").lower() + "|" + (title or "").lower()
     if not force:
         cached = db.get_json_cache(key, max_age=db.cache_max_age("hit"))
-        if cached:
+        # One stored with a cover but no tracklist is a miss: kept only as long
+        # as a miss is, so a record the catalogues add later gets found.
+        if cached and (cached.get("tracks") or db.get_json_cache(
+                key, max_age=db.cache_max_age("miss"))):
             return cached
 
     # One resolution per release, shared. Opening an album page asks for the
@@ -327,7 +322,9 @@ def _resolve_album_detail(key, artist, title, mbid):
         try:
             itunes = itunes_job.result()
         except Exception:  # noqa: BLE001
-            itunes = []
+            itunes = None
+    answered = itunes is not None
+    itunes = itunes or []
     previews = {_norm(t["name"]): t for t in itunes if t.get("preview_url")}
     lf_tracks = lf.get("tracks") or []
     lf_by_name = {_norm(t["name"]): t for t in lf_tracks if t.get("name")}
@@ -364,8 +361,16 @@ def _resolve_album_detail(key, artist, title, mbid):
             for t in itunes
         ]
     else:
-        source = None
-        tracks = []
+        # Last resort: Deezer carries plenty of small-label records that
+        # neither MusicBrainz nor iTunes lists yet. No preview URL is kept from
+        # it -- Deezer's expire within the quarter hour (see app/preview.py).
+        dz_tracks = deezer.album_tracks(artist, title)
+        if dz_tracks is None:
+            answered = False
+        source = "deezer" if dz_tracks else None
+        tracks = [{"name": t["name"], "duration": t.get("duration"),
+                   "url": t.get("url"), "preview_url": None}
+                  for t in dz_tracks or []]
 
     # Which cover wins follows the album-art order in Settings > Metadata
     # (the archive first out of the box: it's the release's own sleeve and it
@@ -389,7 +394,8 @@ def _resolve_album_detail(key, artist, title, mbid):
         "source": source,
     }
     # Only cache once there's something worth keeping, so a transient API failure
-    # doesn't pin an empty tracklist for two weeks.
-    if tracks or image:
+    # doesn't pin an empty tracklist for two weeks -- including a rate-limited
+    # catalogue beside a cover that did come back.
+    if tracks or (image and answered):
         db.set_json_cache(key, data)
     return data

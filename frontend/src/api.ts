@@ -504,6 +504,17 @@ export const api = {
     postJSON<{ freed_bytes: number; size_bytes: number; vacuumed: boolean }>("/api/db/compact"),
 };
 
+// A song a blog posted, streamed whole by Hype Machine (through the app). The
+// names are what the copy saved on disk is called.
+export function hypemStream(
+  itemId: string,
+  names: { artist: string; title: string; album?: string | null },
+): string {
+  const q = new URLSearchParams({ artist: names.artist, title: names.title });
+  if (names.album) q.set("album", names.album);
+  return "/api/hypem-stream/" + encodeURIComponent(itemId) + "?" + q.toString();
+}
+
 // Route a remote image through the on-disk cache (disk-first, URL fallback).
 export function art(url?: string | null): string {
   return url ? "/art?u=" + encodeURIComponent(url) : "";
