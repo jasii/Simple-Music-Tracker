@@ -646,6 +646,8 @@ export interface ArtistExclusives {
 export interface ArtistTopTracksResponse {
   artist: string;
   tracks: ArtistTopTrack[];
+  // Only what was already found: the audio pre-load is running.
+  paused?: boolean;
   error?: string;
 }
 
@@ -825,6 +827,8 @@ export interface PrewarmState {
   } | null;
   // The saved preview audio on disk (app/savedaudio.py).
   disk?: { count: number; bytes: number; dir: string; cap_bytes: number | null };
+  // Services that asked us to slow down, and how much longer they're left alone.
+  backing_off?: { service: string; seconds: number }[];
 }
 
 // One of the user's own search sites, shown beside every release's links.

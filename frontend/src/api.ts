@@ -341,6 +341,8 @@ export const api = {
     getJSON<{
       ready: boolean;
       running: boolean;
+      // The audio pre-load is running, so only what was already found is here.
+      paused?: boolean;
       progress?: { done?: number; total?: number };
       // The track titles in tracklist order.
       order?: string[];
@@ -366,6 +368,8 @@ export const api = {
   trackSource: (artist: string, title: string, url?: string | null) =>
     getJSON<{
       kind: "library" | "sample" | "youtube" | "none";
+      // Nothing found, and nothing looked up: the audio pre-load is running.
+      paused?: boolean;
       label?: string;
       stream?: string;
       youtube_id?: string;

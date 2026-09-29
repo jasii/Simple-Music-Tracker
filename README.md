@@ -99,6 +99,17 @@ and every one you play, is **saved to disk** as `data/previews/<Artist>/<Artist>
 slider; 5 GB by default, least recently played go first), so it keeps
 playing after the catalogue's link has lapsed and the folder can be browsed in
 any music player. For a Hype Machine row that's the whole song the blog posted.
+While the pre-load runs, pages play only audio that's already been found and
+look nothing up themselves.
+
+Every request to an outside service -- from the background jobs, the plugins
+and the pages alike -- shares one **request budget per service**, set from that
+service's published limit (iTunes about 20 searches a minute, Deezer 50 per 5
+seconds, MusicBrainz one a second, Last.fm five a second, gentler for scraped
+sites). A service that answers "slow down" (429, 503, Retry-After, rate-limit
+headers, or its own quota error) is left alone for as long as it asks, and
+that answer is never stored as "not found". Your own servers (music
+libraries, slskd, FlareSolverr) aren't limited.
 
 - **For you:** sort the feed by how well each release fits you (similar to
   your artists, your Last.fm plays, the genres you collect, critic score, how

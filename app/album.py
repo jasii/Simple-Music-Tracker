@@ -239,7 +239,7 @@ def _caa_cover(mbid):
     return plugin.album_art(None, None, mbid)
 
 
-def get_album_detail(artist, title, mbid=None, force=False):
+def get_album_detail(artist, title, mbid=None, force=False, cached_only=False):
     """Return {artist, title, image, lastfm_url, tracks, source}.
 
     MusicBrainz is the source: its tracklist is the tracklist, and the Cover
@@ -249,7 +249,8 @@ def get_album_detail(artist, title, mbid=None, force=False):
     can't be asked (nothing passed a release-group id) or has no tracks for the
     release, which is how a Discover row with no MBID still reads properly.
 
-    Each track: {name, duration, url, preview_url}.
+    Each track: {name, duration, url, preview_url}. *cached_only* answers
+    from what's stored (an empty tracklist when nothing is), asking no one.
     """
     # Versioned: entries stored before MusicBrainz became the source hold a
     # catalogue's tracklist, and ones from before names were compared word-wise
@@ -262,6 +263,8 @@ def get_album_detail(artist, title, mbid=None, force=False):
         if cached and (cached.get("tracks") or db.get_json_cache(
                 key, max_age=db.cache_max_age("miss"))):
             return cached
+    if cached_only:
+        return db.get_json_cache(key) or {"artist": artist, "title": title, "tracks": []}
 
     # One resolution per release, shared. Opening an album page asks for the
     # detail and for its playability at once and both need the tracklist, so

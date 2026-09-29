@@ -7,7 +7,7 @@ topics need no credentials; protected ones take a token.
 
 import requests
 
-from ... import db
+from ... import db, ratelimit
 from . import NotifierPlugin, register, setting_on  # noqa: F401 - setting_on re-exported
 
 _TIMEOUT = 10
@@ -61,7 +61,7 @@ class NtfyNotifier(NotifierPlugin):
         if url:
             headers["Click"] = url
         try:
-            resp = requests.post(f"{self.server()}/{self.topic()}",
+            resp = ratelimit.post(f"{self.server()}/{self.topic()}", max_wait=30,
                                  data=message.encode("utf-8"),
                                  headers=headers, timeout=_TIMEOUT)
         except requests.RequestException as exc:

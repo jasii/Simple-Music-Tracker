@@ -14,9 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from email.utils import parsedate_to_datetime
 
-import requests
-
-from ... import db, lastfm, musicbrainz
+from ... import db, lastfm, musicbrainz, ratelimit
 from . import normalize_items
 from .metacritic import _cache_ttl, _enrich_workers
 
@@ -30,10 +28,14 @@ _locks_guard = threading.Lock()
 
 
 def get(url, params=None, timeout=20, **kw):
-    """GET with a browser User-Agent; raises for an HTTP error."""
+    """GET with a browser User-Agent, within the site's request budget.
+
+    Raises for an HTTP error, and ratelimit.Throttled when the site is
+    rate limiting us.
+    """
     headers = {"User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9"}
     headers.update(kw.pop("headers", {}) or {})
-    resp = requests.get(url, params=params, headers=headers, timeout=timeout, **kw)
+    resp = ratelimit.get(url, params=params, headers=headers, timeout=timeout, **kw)
     resp.raise_for_status()
     return resp
 

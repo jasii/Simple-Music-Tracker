@@ -45,7 +45,7 @@ except ImportError:  # pragma: no cover - optional dependency
 _FIREFOX_TARGETS = ("firefox135", "firefox133", "firefox")
 _CHROME_TARGETS = ("chrome136", "chrome133a", "chrome131", "chrome")
 
-from ... import db
+from ... import db, ratelimit
 from .. import solver
 from . import DiscoveryPlugin, normalize_items, register
 # Shared enrichment pipeline (cached Last.fm / MusicBrainz lookups).
@@ -199,15 +199,18 @@ def _impersonate_targets():
 
 
 def _get(url, headers):
-    """Fetch with a browser TLS fingerprint when curl_cffi is available."""
+    """Fetch with a browser TLS fingerprint when curl_cffi is available.
+
+    Within the site's request budget either way (see app/ratelimit.py).
+    """
     if cffi_requests is not None:
         for target in _impersonate_targets():
             try:
-                return cffi_requests.get(url, headers=headers,
-                                         impersonate=target, timeout=20)
+                return ratelimit.get(url, headers=headers, impersonate=target,
+                                     timeout=20, send=cffi_requests.request)
             except (ValueError, TypeError):
                 continue  # this curl_cffi doesn't know the target; try older
-    return requests.get(url, headers=headers, timeout=20)
+    return ratelimit.get(url, headers=headers, timeout=20)
 
 
 # --- getting past the challenge ---------------------------------------------

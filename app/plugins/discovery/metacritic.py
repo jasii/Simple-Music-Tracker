@@ -13,10 +13,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
-import requests
 from bs4 import BeautifulSoup
 
-from ... import db, lastfm, musicbrainz
+from ... import db, lastfm, musicbrainz, ratelimit
 from . import DiscoveryPlugin, normalize_items, register
 
 BASE = "https://www.metacritic.com"
@@ -212,7 +211,7 @@ def parse_releases(html):
 
 
 def _fetch_page():
-    resp = requests.get(BASE + LIST_PATH, headers=_headers(), timeout=20)
+    resp = ratelimit.get(BASE + LIST_PATH, headers=_headers(), timeout=20)
     resp.raise_for_status()
     return resp.text
 

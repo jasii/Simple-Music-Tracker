@@ -7,7 +7,7 @@ one -- clients read, applications write.
 
 import requests
 
-from ... import db
+from ... import db, ratelimit
 from . import NotifierPlugin, register
 
 _TIMEOUT = 10
@@ -68,7 +68,7 @@ class GotifyNotifier(NotifierPlugin):
                 "client::notification": {"click": {"url": url}},
             }
         try:
-            resp = requests.post(f"{self.server()}/message",
+            resp = ratelimit.post(f"{self.server()}/message", max_wait=30,
                                  params={"token": self.token()},
                                  json=payload, timeout=_TIMEOUT)
         except requests.RequestException as exc:

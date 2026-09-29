@@ -16,7 +16,7 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 
-from ... import db
+from ... import db, ratelimit
 from . import DiscoveryPlugin, normalize_items, register
 
 BASE = "https://www.last.fm"
@@ -118,7 +118,7 @@ def parse_releases(html):
 
 
 def _fetch_page(page):
-    resp = requests.get(
+    resp = ratelimit.get(
         BASE + LIST_PATH,
         params={"page": page},
         headers=_headers(),

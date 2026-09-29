@@ -21,7 +21,7 @@ import time
 
 from flask import send_file
 
-from . import db
+from . import db, ratelimit
 
 try:  # optional: previews fall back to the embed without it
     import yt_dlp
@@ -35,6 +35,9 @@ _FORMAT = "bestaudio[acodec^=mp4a]/bestaudio[ext=m4a]/bestaudio"
 # The extracted URL carries its own expiry -- a few hours -- so it is cached
 # for less than that and re-resolved after.
 _URL_TTL = 2 * 3600
+
+# What a video's requests count against in app/ratelimit.py.
+_WATCH = "https://www.youtube.com/watch"
 
 _BROWSER_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -81,6 +84,12 @@ def audio_url(video_id):
             "quiet": True, "no_warnings": True, "skip_download": True,
             "format": _FORMAT, "noplaylist": True,
         }
+        try:
+            # yt-dlp sends its own requests; they count against YouTube's
+            # budget all the same (see app/ratelimit.py).
+            ratelimit.acquire(_WATCH, max_wait=30)
+        except ratelimit.Throttled:
+            return None  # not a miss: ask again next time
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(
@@ -144,6 +153,12 @@ def _prune():
             return
 
 
+def on_disk(video_id):
+    """Is this video's audio already fetched? (No network either way.)"""
+    path = _path_for(video_id) if video_id else None
+    return bool(path) and os.path.isfile(path) and os.path.getsize(path) > 0
+
+
 def fetch_file(video_id):
     """The audio as a file on disk, fetched once, or None.
 
@@ -170,6 +185,10 @@ def fetch_file(video_id):
             # No merging, no conversion: one stream, saved as it arrives.
             "postprocessors": [],
         }
+        try:
+            ratelimit.acquire(_WATCH, max_wait=30)
+        except ratelimit.Throttled:
+            return None
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
                 ydl.download([f"https://www.youtube.com/watch?v={video_id}"])

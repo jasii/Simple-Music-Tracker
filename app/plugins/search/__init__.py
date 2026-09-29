@@ -18,7 +18,7 @@ import requests
 
 from .. import Plugin, register, get_plugins, get_plugin  # noqa: F401 - re-exported
 
-from ... import db
+from ... import db, ratelimit
 
 # Placeholders a search URL may carry. One without any has the query added
 # on the end, so "https://example.com/search?q=" works as typed.
@@ -112,8 +112,8 @@ def _looks_like_image(resp):
 
 
 def _get(url):
-    return requests.get(url, timeout=(5, 10), headers={"User-Agent": _USER_AGENT},
-                        allow_redirects=True)
+    return ratelimit.get(url, timeout=(5, 10), headers={"User-Agent": _USER_AGENT},
+                         allow_redirects=True, max_wait=20)
 
 
 def _find_icon(origin):

@@ -126,7 +126,10 @@ export default function AlbumDetail() {
     queryKey: ["albumPlayable", artist, title, mbid],
     queryFn: () => api.albumPlayable(artist, title, mbid || undefined),
     enabled: tracks.length > 0,
-    refetchInterval: (q) => (q.state.data && !q.state.data.ready ? 3000 : false),
+    // Held back while the audio pre-load runs: asked again now and then, so
+    // the page carries on by itself once it's done.
+    refetchInterval: (q) =>
+      q.state.data && !q.state.data.ready ? (q.state.data.paused ? 15000 : 3000) : false,
   });
   const source = (name: string) => playable?.tracks?.[name];
   // The library holds fewer tracks of this than the tracklist has. Decided on
@@ -326,10 +329,15 @@ export default function AlbumDetail() {
 
       <h2 className="mt-6 mb-2 flex flex-wrap items-center gap-3 text-xl font-semibold">
         Tracks
-        {tracks.length > 0 && playable && !playable.ready && (
+        {tracks.length > 0 && playable && !playable.ready && !playable.paused && (
           <span className="flex min-w-[12rem] items-center gap-2 text-sm font-normal text-muted-foreground">
             <Progress value={audioProgress} className="w-24" />
             finding audio {playable.progress?.done ?? 0}/{playable.progress?.total ?? tracks.length}
+          </span>
+        )}
+        {tracks.length > 0 && playable?.paused && (
+          <span className="text-sm font-normal text-muted-foreground">
+            finding audio waits for the pre-load to finish
           </span>
         )}
       </h2>

@@ -17,7 +17,7 @@ import time
 import requests
 from bs4 import BeautifulSoup
 
-from . import db
+from . import db, ratelimit
 
 BASE = "https://www.metacritic.com"
 LIST_PATH = "/browse/albums/release-date/new-releases/date"
@@ -74,7 +74,7 @@ def refresh():
         scores = {}
         for page in range(PAGES):
             try:
-                resp = requests.get(
+                resp = ratelimit.get(
                     BASE + LIST_PATH, params={"page": page} if page else None,
                     headers={"User-Agent": _USER_AGENT, "Accept-Language": "en-US,en;q=0.9"},
                     timeout=(5, 20),

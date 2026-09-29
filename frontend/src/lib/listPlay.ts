@@ -13,6 +13,7 @@ import {
   type QueueContinuation,
 } from "../components/PreviewPlayer";
 import { continueOn, samplerSize } from "./playPrefs";
+import { explainNoAudio } from "../components/PrewarmNotice";
 
 export type PlayRow = {
   /** Which row this is: the player marks it while its tracks play. */
@@ -220,7 +221,7 @@ export function useRowPlayer() {
       .then((queue) => {
         if (mine !== token.current) return;
         if (!queue.length) {
-          toast.error(`Nothing to play for ${rowLabel(row)}.`);
+          explainNoAudio(rowLabel(row), `Nothing to play for ${rowLabel(row)}.`);
           return;
         }
         player.toggle(queue, 0, continueFrom(rows, index, skip));

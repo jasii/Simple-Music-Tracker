@@ -8,7 +8,7 @@ HEAD. Answers already on disk (or already known to be missing) cost nothing.
 
 import requests
 
-from ... import artwork, musicbrainz
+from ... import artwork, musicbrainz, ratelimit
 from . import MetadataPlugin, register
 
 USER_AGENT = "SimpleMusicTracker/1.0 (+https://github.com/jasii/Simple-Music-Tracker)"
@@ -39,8 +39,8 @@ class CoverArtArchiveMetadata(MetadataPlugin):
         try:
             # HEAD, not the bytes: the browser asks /art for those, which caches
             # them then. This only has to answer "is there a front cover".
-            resp = requests.head(url, timeout=(5, 10), allow_redirects=True,
-                                 headers={"User-Agent": USER_AGENT})
+            resp = ratelimit.head(url, timeout=(5, 10), allow_redirects=True,
+                                  headers={"User-Agent": USER_AGENT}, max_wait=20)
             return url if resp.status_code == 200 else None
         except requests.RequestException:
             return None

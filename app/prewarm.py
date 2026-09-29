@@ -22,7 +22,7 @@ import time
 from datetime import date, timedelta
 
 from . import album as album_detail
-from . import critics, db, lastfm, playable, savedaudio, similar
+from . import critics, db, lastfm, playable, ratelimit, savedaudio, similar
 
 # How far past today releases count as "this month".
 WINDOW_DAYS = 30
@@ -63,11 +63,23 @@ def get_state():
     state["enabled"] = enabled()
     state["last"] = db.get_json_cache(_LAST_KEY)
     state["disk"] = savedaudio.stats()
+    # Services that asked us to slow down and are being left alone for now.
+    state["backing_off"] = ratelimit.status()
     return state
 
 
 def enabled():
     return (db.get_setting("prewarm_audio_enabled") or "true").strip().lower() == "true"
+
+
+def running():
+    """Is a pre-load going right now?
+
+    While it is, the pages don't look audio up themselves (see
+    audio_lookups_paused in app/main.py): the pre-load is already spending
+    the catalogues' request budgets, and it's finding the same things.
+    """
+    return _run_lock.locked()
 
 
 def _week_start(today):

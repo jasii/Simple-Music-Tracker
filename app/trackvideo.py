@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 import requests
 
-from . import db
+from . import db, ratelimit
 from .plugins import solver
 
 try:  # optional: the same impersonating client the AOTY scraper uses
@@ -57,29 +57,41 @@ def track_page(artist, title):
 
 
 def _fetch(url):
-    """The page's HTML, or None. Browser fingerprint first, solver second."""
+    """The page's HTML, or None. Browser fingerprint first, solver second.
+
+    Every attempt is one request against Last.fm's website budget (see
+    app/ratelimit.py). Raises ratelimit.Throttled when Last.fm is rate
+    limiting us: that isn't a page without a video.
+    """
     headers = {"User-Agent": _USER_AGENT, "Accept-Language": "en-US,en;q=0.9"}
     if cffi_requests is not None:
         for target in _IMPERSONATE:
             try:
-                resp = cffi_requests.get(url, headers=headers,
-                                         impersonate=target, timeout=20)
+                resp = ratelimit.get(url, headers=headers, impersonate=target,
+                                     timeout=20, max_wait=30,
+                                     send=cffi_requests.request)
             except (ValueError, TypeError):
                 continue  # this curl_cffi build doesn't know that profile
+            except ratelimit.Throttled:
+                raise
             except Exception:  # noqa: BLE001 - transport failure, try the solver
                 break
             if resp.status_code == 200 and len(resp.text) > 20_000:
                 return resp.text
             break
     try:
-        resp = requests.get(url, headers=headers, timeout=20)
+        resp = ratelimit.get(url, headers=headers, timeout=20, max_wait=30)
         if resp.status_code == 200 and len(resp.text) > 20_000:
             return resp.text
+    except ratelimit.Throttled:
+        raise
     except requests.RequestException:
         pass
     # Still challenged: hand it to FlareSolverr, if the user set one up.
     try:
         solved = solver.fetch_html(url)
+    except ratelimit.Throttled:
+        raise
     except Exception:  # noqa: BLE001 - a solver failure is just a miss
         solved = None
     return (solved or {}).get("html")
@@ -93,11 +105,12 @@ def _first_id(html):
     return None
 
 
-def for_track(artist, title, page_url=None):
+def for_track(artist, title, page_url=None, cached_only=False):
     """The YouTube id Last.fm plays for this track, or None.
 
     *page_url* is the track's own Last.fm page when a tracklist gave us one;
-    otherwise the canonical artist/title URL is used.
+    otherwise the canonical artist/title URL is used. *cached_only* answers
+    from what's stored, or not at all.
     """
     if not artist or not title:
         return None
@@ -110,10 +123,15 @@ def for_track(artist, title, page_url=None):
             cache_key, max_age=db.cache_max_age("miss")) is not None:
         return None
 
+    if cached_only:
+        return None
     video_id = None
-    for url in [u for u in (page_url, track_page(artist, title)) if u]:
-        video_id = _first_id(_fetch(url))
-        if video_id:
-            break
+    try:
+        for url in [u for u in (page_url, track_page(artist, title)) if u]:
+            video_id = _first_id(_fetch(url))
+            if video_id:
+                break
+    except ratelimit.Throttled:
+        return None  # Last.fm is rate limiting us: ask again another time
     db.set_json_cache(cache_key, {"id": video_id})
     return video_id

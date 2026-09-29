@@ -13,7 +13,7 @@ import time
 
 import requests
 
-from . import db
+from . import db, ratelimit
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -125,9 +125,12 @@ def fetch(url):
         if negative_cached(url):
             return None
         try:
-            resp = requests.get(
+            # Within the image host's request budget (a page of covers is
+            # dozens at once); a host that's rate limiting us raises
+            # Throttled, which is transient, never a miss.
+            resp = ratelimit.get(
                 url, headers={"User-Agent": USER_AGENT}, timeout=(5, 15),
-                stream=True,
+                stream=True, max_wait=20,
             )
             if 400 <= resp.status_code < 500:
                 _mark_miss(key)

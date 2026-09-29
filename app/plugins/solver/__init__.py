@@ -18,7 +18,7 @@ registers every bundled solver.
 
 from .. import Plugin, register, get_plugins, get_plugin  # noqa: F401 - re-exported
 
-from ... import db
+from ... import db, ratelimit
 
 # Values that mean "off" for an enable toggle stored as a string setting.
 _OFF = ("false", "0", "off", "no", "")
@@ -94,6 +94,9 @@ def fetch_html(url, timeout=None):
     plugin = active()
     if plugin is None:
         return None
+    # The solver is ours, but the page it opens is someone else's site: that
+    # visit counts against the site's request budget like any other.
+    ratelimit.acquire(url, max_wait=60)
     return plugin.solve(url, timeout=timeout)
 
 

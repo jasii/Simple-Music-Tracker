@@ -6,18 +6,16 @@ first (the widest catalogue), Deezer second. Every answer -- misses included --
 is stored in json_cache, so an artist page that has been opened once never
 looks its samples up again.
 
-Neither service needs an API key, and both ask to be treated gently, so all
-lookups here are serialised and paced.
+Neither service needs an API key, and both ask to be treated gently: every
+lookup here keeps to their limits through app/ratelimit.py.
 """
 
 import re
-import threading
 import time
-from urllib.parse import urlparse
 
 import requests
 
-from . import db, names
+from . import db, names, ratelimit
 
 ITUNES_SEARCH = "https://itunes.apple.com/search"
 DEEZER_SEARCH = "https://api.deezer.com/search"
@@ -27,60 +25,33 @@ DEEZER_TRACK = "https://api.deezer.com/track/{}"
 # settings (store_keep_days / store_miss_days): a preview URL keeps working
 # (Deezer's are re-signed as they lapse, see _resign), while a miss is worth
 # retrying -- the track may land on a service later.
-
-_GAP_S = 0.25
-_pace_lock = threading.Lock()
-_last_call = [0.0]
-
-# A catalogue that has said "slow down" is left alone for a while, doubling
-# each time it says it again. iTunes allows about twenty searches a minute and
-# answers 403 past that; Deezer answers 200 with an error body. Neither is
-# "this track doesn't exist", so neither may be stored as a miss.
-_COOLDOWN_S = 60
-_COOLDOWN_MAX_S = 600
-_cooldown = {}  # host -> (until, current length)
-
-
-def _cooling(host):
-    until, _length = _cooldown.get(host, (0, 0))
-    return time.time() < until
+#
+# Every request goes through the shared limiter (see app/ratelimit.py): iTunes
+# allows about twenty searches a minute, Deezer fifty per five seconds, and the
+# pre-load, the pages and the Discover scrapes all count against the same.
+# A lookup waits this long for its turn before giving up on that catalogue --
+# long enough to ride out a burst, short enough that the next source answers
+# instead of the page sitting there.
+_WAIT_S = 5
 
 
 def throttled():
-    """Is any catalogue sitting out a rate limit right now?
+    """Is either catalogue out of requests right now?
 
     A track that found nothing while one was can't be called a miss.
     """
-    return any(_cooling(host) for host in list(_cooldown))
+    return ratelimit.strained(ITUNES_SEARCH) or ratelimit.strained(DEEZER_SEARCH)
 
 
-def _back_off(host):
-    with _pace_lock:
-        _until, length = _cooldown.get(host, (0, 0))
-        length = min(length * 2, _COOLDOWN_MAX_S) if length else _COOLDOWN_S
-        _cooldown[host] = (time.time() + length, length)
-
-
-def _paced_get(url, params=None):
-    """GET one catalogue, no faster than one request every _GAP_S.
+def _paced_get(url, params=None, max_wait=_WAIT_S):
+    """GET one catalogue within its request budget.
 
     None when the catalogue couldn't answer (network, rate limit, an error
     body) -- as opposed to answering that it has nothing, which is a result.
     Callers must not remember a None as a miss.
     """
-    host = urlparse(url).netloc
-    if _cooling(host):
-        return None
-    with _pace_lock:
-        wait = _last_call[0] + _GAP_S - time.time()
-        if wait > 0:
-            time.sleep(wait)
-        _last_call[0] = time.time()
     try:
-        resp = requests.get(url, params=params, timeout=(5, 10))
-        if resp.status_code in (403, 429):
-            _back_off(host)
-            return None
+        resp = ratelimit.get(url, params=params, timeout=(5, 10), max_wait=max_wait)
         resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError):
@@ -88,9 +59,8 @@ def _paced_get(url, params=None):
     if isinstance(data, dict) and data.get("error"):
         # Deezer's quota error (code 4) is a 200 with this body.
         if (data["error"] or {}).get("code") == 4:
-            _back_off(host)
+            ratelimit.back_off(url)
         return None
-    _cooldown.pop(host, None)
     return data
 
 
@@ -326,6 +296,7 @@ def for_track(artist, title, cached_only=False):
     return None
 
 
-def for_tracks(artist, titles):
+def for_tracks(artist, titles, cached_only=False):
     """Preview URLs for several tracks by one artist: {title: url or None}."""
-    return {title: for_track(artist, title) for title in titles or []}
+    return {title: for_track(artist, title, cached_only=cached_only)
+            for title in titles or []}

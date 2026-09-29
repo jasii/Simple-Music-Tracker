@@ -50,13 +50,16 @@ def _fingerprint(titles):
     return hashlib.sha1(joined.encode()).hexdigest()[:16]
 
 
-def resolve_one(artist, title, page_url=None):
+def resolve_one(artist, title, page_url=None, cached_only=False):
     """What one track can be played from.
 
     Your own library first, always: that's the whole song rather than a
     fragment of it. Failing that, the preview sources in the order set in
     Settings > Metadata -- a catalogue sample streams through the app, while a
     video source hands back an embed id instead.
+
+    *cached_only* asks no outside service (your own library still counts):
+    only what's already been found, saved or stored answers.
 
     Returns {"kind": "library"|"sample"|"youtube"|"none", ...}.
     """
@@ -85,7 +88,8 @@ def resolve_one(artist, title, page_url=None):
 
     for source in registry.sources("track_preview"):
         try:
-            answer = source.track_preview(artist, title, page_url=page_url)
+            answer = source.track_preview(artist, title, page_url=page_url,
+                                          cached_only=cached_only)
         except Exception:  # noqa: BLE001 - one bad source isn't the track
             continue
         if not answer:
@@ -104,8 +108,10 @@ def resolve_one(artist, title, page_url=None):
                      # The audio is a video's, whoever found it.
                      "icon": "youtube"}
             # With the extractor installed the audio plays through the app's
-            # own player; without it the page falls back to the embed.
-            if videoaudio.available():
+            # own player; without it the page falls back to the embed. Asking
+            # only the cache, that's only when the audio is already on disk.
+            if videoaudio.available() and (
+                    not cached_only or videoaudio.on_disk(answer["youtube_id"])):
                 found["stream"] = _track_stream_url(artist, title)
             return found
     return {"kind": "none"}

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink } from "react-router-dom";
 import { api } from "../api";
+import { PrewarmNotice } from "../components/PrewarmNotice";
 import { AlbumArt } from "../components/AlbumArt";
 import type { UpcomingRelease } from "../types";
 import { useNav } from "../nav";
@@ -301,6 +302,7 @@ export default function Upcoming() {
 
   return (
     <div>
+      <PrewarmNotice />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Upcoming Releases</h1>
         <div className="flex flex-wrap items-center gap-3 text-sm">

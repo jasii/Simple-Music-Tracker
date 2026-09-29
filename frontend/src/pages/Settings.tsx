@@ -2563,7 +2563,9 @@ function PrewarmSection({
         plays from -- on Discover and on Upcoming -- so pressing play starts
         straight away. A record that isn't out yet gets the artist's top tracks
         instead, which is what Discover plays for it. The artists' genres come
-        along for the Discover rows.
+        along for the Discover rows. While it runs, pages play only audio that's
+        already been found and look nothing up themselves, so the two together
+        stay inside every site's request limits.
       </Hint>
       <Check
         checked={get("prewarm_audio_enabled") !== "false"}
@@ -2633,6 +2635,12 @@ function PrewarmSection({
       </div>
       {data?.running && data.total > 0 && (
         <Progress value={Math.round((data.done / data.total) * 100)} className="mt-3" />
+      )}
+      {!!data?.backing_off?.length && (
+        <Hint>
+          Asked to slow down, so left alone for now:{" "}
+          {data.backing_off.map((b) => `${b.service} (${b.seconds}s)`).join(", ")}.
+        </Hint>
       )}
     </Section>
   );

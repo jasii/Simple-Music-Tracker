@@ -7,7 +7,7 @@ block rather than a wall of text.
 
 import requests
 
-from ... import db
+from ... import db, ratelimit
 from . import NotifierPlugin, register
 
 _TIMEOUT = 10
@@ -58,7 +58,8 @@ class DiscordNotifier(NotifierPlugin):
         if name:
             payload["username"] = name
         try:
-            resp = requests.post(self.webhook(), json=payload, timeout=_TIMEOUT)
+            resp = ratelimit.post(self.webhook(), json=payload, timeout=_TIMEOUT,
+                                  max_wait=30)
         except requests.RequestException as exc:
             raise RuntimeError(f"could not reach Discord: {exc}") from exc
         if resp.status_code == 404:

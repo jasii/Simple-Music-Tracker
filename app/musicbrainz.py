@@ -6,17 +6,16 @@ release-groups and keep the ones whose first-release-date is in the future
 (or very recent). Cover art is pulled from the Cover Art Archive.
 
 MusicBrainz asks for at most one request per second and a descriptive
-User-Agent, both of which are enforced here.
+User-Agent: the pace is kept by app/ratelimit.py, the User-Agent here.
 """
 
 import re
-import threading
 import time
 from datetime import date, datetime, timedelta
 
 import requests
 
-from . import db
+from . import db, ratelimit
 
 # Matches a MusicBrainz artist id (UUID), whether pasted raw or inside a URL
 # like https://musicbrainz.org/artist/<mbid>.
@@ -37,30 +36,14 @@ _TYPE_LABELS = {"album": "Album", "ep": "EP", "single": "Single"}
 # How far back a release still counts as "new" when surfacing it.
 RECENT_WINDOW_DAYS = 30
 
-# Serialise and pace all MusicBrainz requests so a large library can't trip
-# their rate limiting (which would get the instance temporarily blocked).
-_rate_lock = threading.Lock()
-_last_request = [0.0]
-
-
-def _min_interval():
-    """Minimum seconds between MusicBrainz requests, from settings."""
-    try:
-        ms = float(db.get_setting("musicbrainz_rate_limit_ms") or 1100)
-    except (TypeError, ValueError):
-        ms = 1100
-    # Never go below MusicBrainz's documented 1 req/sec ceiling.
-    return max(ms / 1000.0, 1.0)
-
-
 def _user_agent():
     contact = db.get_setting("musicbrainz_contact") or "https://github.com/jasii/simple-music-tracker"
     return f"SimpleMusicTracker/1.0 ( {contact} )"
 
 
-# Status codes worth retrying: rate limiting (429) and transient server errors.
-# Mirrors aurral's retry set; 404 (not found) is never retried.
-_RETRY_STATUSES = {429, 500, 502, 503, 504}
+# Transient server errors worth another try. Rate limiting (429, 503) is
+# app/ratelimit.py's to deal with: it waits out the pause MusicBrainz asks for.
+_RETRY_STATUSES = {500, 502, 504}
 
 # Total retries after the first attempt (aurral uses 3).
 _MAX_RETRIES = 3
@@ -72,49 +55,31 @@ def _backoff_seconds(attempt):
 
 
 def _rate_limited_get(url, params=None, _attempt=1):
-    """GET MusicBrainz with global pacing and retries on transient failures.
+    """GET MusicBrainz within its one-request-a-second limit, with retries.
 
-    All callers funnel through here and are spaced by at least the configured
-    interval. The lock only reserves the next time slot; the HTTP call happens
-    *outside* it, so one slow/hung request can't block every other MusicBrainz
-    lookup behind the lock. ``timeout`` is a (connect, read) pair so a server
-    that trickles bytes can't hold a request open indefinitely.
+    The pace is kept by app/ratelimit.py, shared by everything that asks
+    MusicBrainz -- the refresh worker, the pre-load, a page -- so together they
+    stay under the limit (musicbrainz_rate_limit_ms can only slow it further).
+    ``timeout`` is a (connect, read) pair so a server that trickles bytes can't
+    hold a request open indefinitely. Raises ratelimit.Throttled when
+    MusicBrainz has asked for a longer pause than a caller should sit through.
     """
-    with _rate_lock:
-        interval = _min_interval()
-        scheduled = max(time.time(), _last_request[0] + interval)
-        _last_request[0] = scheduled
-    wait = scheduled - time.time()
-    if wait > 0:
-        time.sleep(wait)
-
-    error = None
-    resp = None
     try:
-        resp = requests.get(
+        resp = ratelimit.get(
             url,
             params=params,
             headers={"User-Agent": _user_agent(), "Accept": "application/json"},
             timeout=(10, 30),
         )
-    except (requests.ConnectionError, requests.Timeout) as exc:
+    except (requests.ConnectionError, requests.Timeout):
         # Transient connection errors (ECONNRESET/ETIMEDOUT equivalents).
-        error = exc
-
-    if error is not None:
         if _attempt <= _MAX_RETRIES:
             time.sleep(min(_backoff_seconds(_attempt), 10))
             return _rate_limited_get(url, params, _attempt + 1)
-        raise error
+        raise
 
-    # 429 = rate limited, 5xx = transient server error. Back off and retry.
     if resp.status_code in _RETRY_STATUSES and _attempt <= _MAX_RETRIES:
-        retry_after = resp.headers.get("Retry-After")
-        try:
-            wait = float(retry_after) if retry_after else _backoff_seconds(_attempt)
-        except ValueError:
-            wait = _backoff_seconds(_attempt)
-        time.sleep(min(wait, 60))
+        time.sleep(min(_backoff_seconds(_attempt), 10))
         return _rate_limited_get(url, params, _attempt + 1)
 
     resp.raise_for_status()

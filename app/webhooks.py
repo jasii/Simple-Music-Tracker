@@ -9,7 +9,7 @@ import json
 
 import requests
 
-from . import db
+from . import db, ratelimit
 
 DEFAULT_TEMPLATE = json.dumps(
     {
@@ -80,7 +80,7 @@ def fire(artist, release):
         send_kwargs["data"] = body.encode("utf-8")
 
     try:
-        resp = requests.request(method, url, **send_kwargs)
+        resp = ratelimit.request(method, url, max_wait=30, **send_kwargs)
         ok = resp.status_code < 400
         return ok, f"{resp.status_code}"
     except requests.RequestException as exc:

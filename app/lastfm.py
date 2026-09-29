@@ -10,7 +10,7 @@ import time
 
 import requests
 
-from . import db
+from . import db, ratelimit
 
 LASTFM_BASE = "https://ws.audioscrobbler.com/2.0/"
 
@@ -37,10 +37,10 @@ def check_api_key():
     if not key:
         return False, "No API key set."
     try:
-        resp = requests.get(
+        resp = ratelimit.get(
             LASTFM_BASE,
             params={"method": "auth.getToken", "api_key": key, "format": "json"},
-            timeout=6,
+            timeout=6, max_wait=10,
         )
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
@@ -52,26 +52,61 @@ def check_api_key():
     return False, "Unexpected response from Last.fm."
 
 # Aurral's Last.fm tuning: short timeout with a couple of retries and a small
-# exponential backoff. We serialise Last.fm calls through the refresh worker, so
-# no separate concurrency limiter is needed.
+# exponential backoff. The pace itself -- Last.fm allows five calls a second,
+# shared by every job and page -- is kept by app/ratelimit.py.
 _TIMEOUT_S = 6
 _MAX_RETRIES = 2
+# Last.fm's own error codes: 29 is "rate limit exceeded"; 8, 11 and 16 are
+# its ways of saying "try again later".
+_RATE_LIMITED = 29
+_TRANSIENT = {8, 11, 16}
 
 
 def _lastfm_get(params):
-    """GET the Last.fm API with retries/backoff. Returns parsed JSON or None."""
+    """GET the Last.fm API with retries/backoff. Returns parsed JSON or None.
+
+    None means Last.fm couldn't answer -- the network, its rate limit, a
+    passing error -- which is never "nothing there": callers must not store
+    it as an empty answer.
+    """
     for attempt in range(_MAX_RETRIES + 1):
         try:
-            resp = requests.get(LASTFM_BASE, params=params, timeout=_TIMEOUT_S)
+            resp = ratelimit.get(LASTFM_BASE, params=params, timeout=_TIMEOUT_S)
             # Retry transient server errors; otherwise use what we got.
-            if resp.status_code in (429, 500, 502, 503, 504):
+            if resp.status_code in (500, 502, 504):
                 raise requests.HTTPError(response=resp)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+        except ratelimit.Throttled:
+            return None
         except (requests.RequestException, ValueError):
             if attempt >= _MAX_RETRIES:
                 return None
             time.sleep(0.3 * (2 ** attempt) + attempt * 0.2)
+            continue
+        error = data.get("error") if isinstance(data, dict) else None
+        if error == _RATE_LIMITED:
+            ratelimit.back_off(LASTFM_BASE)
+            return None
+        if error in _TRANSIENT and attempt < _MAX_RETRIES:
+            time.sleep(0.3 * (2 ** attempt) + attempt * 0.2)
+            continue
+        return None if error in _TRANSIENT else data
+    return None
+
+
+def _stored_list(cache_key, max_age):
+    """A stored list, or None to look it up.
+
+    An empty list is a miss: it's kept only for the (shorter) miss window,
+    so an artist Last.fm had nothing for -- or a lookup from before failed
+    calls stopped being stored -- is asked about again.
+    """
+    cached = db.get_json_cache(cache_key, max_age=max_age)
+    if cached is None:
+        return None
+    if cached or db.get_json_cache(cache_key, max_age=db.cache_max_age("miss")) is not None:
+        return cached
     return None
 
 
@@ -134,6 +169,8 @@ def get_album_info(artist, album, max_age=db.FROM_SETTINGS):
             cache_key, max_age=db.cache_max_age("miss")) == {}:
         return {}
     info = _fetch_album_info(api_key, artist, album)
+    if info is None:
+        return {}  # Last.fm didn't answer: not a miss worth remembering
     db.set_json_cache(cache_key, info)
     return info
 
@@ -145,7 +182,10 @@ def cached_album_info(artist, album):
 
 
 def _fetch_album_info(api_key, artist, album):
-    """Uncached album.getInfo lookup. Returns {} when there's nothing usable."""
+    """Uncached album.getInfo lookup.
+
+    {} when there's nothing usable, None when Last.fm couldn't answer.
+    """
     data = _lastfm_get(
         {
             "method": "album.getinfo",
@@ -156,8 +196,8 @@ def _fetch_album_info(api_key, artist, album):
             "autocorrect": 1,
         }
     )
-    if not data:
-        return {}
+    if data is None:
+        return None
     info = data.get("album")
     if not info:
         return {}
@@ -218,6 +258,8 @@ def get_artist_info(name, max_age=db.FROM_SETTINGS):
             cache_key, max_age=db.cache_max_age("miss")) == {}:
         return {}
     info = _fetch_artist_info(api_key, name)
+    if info is None:
+        return {}  # Last.fm didn't answer: not a miss worth remembering
     db.set_json_cache(cache_key, info)
     return info
 
@@ -271,7 +313,9 @@ def top_artists(period="overall", limit=200, max_age=db.FROM_SETTINGS):
         "limit": limit,
         "api_key": api_key,
         "format": "json",
-    }) or {}
+    })
+    if data is None:
+        return []  # Last.fm didn't answer: ask again next time
     artists = ((data.get("topartists") or {}).get("artist")) or []
     out = []
     for item in artists:
@@ -325,7 +369,7 @@ def similar_artists(name, limit=30, max_age=db.FROM_SETTINGS):
     if not api_key or not name:
         return []
     cache_key = f"lfsimilar:{name.strip().lower()}:{limit}"
-    cached = db.get_json_cache(cache_key, max_age=db.resolve_max_age(max_age, "hit"))
+    cached = _stored_list(cache_key, db.resolve_max_age(max_age, "hit"))
     if cached is not None:
         return cached
     data = _lastfm_get({
@@ -335,7 +379,9 @@ def similar_artists(name, limit=30, max_age=db.FROM_SETTINGS):
         "api_key": api_key,
         "format": "json",
         "autocorrect": 1,
-    }) or {}
+    })
+    if data is None:
+        return []  # Last.fm didn't answer: ask again next time
     entries = ((data.get("similarartists") or {}).get("artist")) or []
     out = []
     for entry in entries:
@@ -399,10 +445,11 @@ def track_album(artist, track, max_age=db.FROM_SETTINGS):
     return out
 
 
-def top_tracks(name, limit=5, max_age=db.FROM_SETTINGS):
+def top_tracks(name, limit=5, max_age=db.FROM_SETTINGS, cached_only=False):
     """The artist's most-played tracks: [{name, url, playcount, mbid}].
 
     Empty when there's no API key, no match, or the call failed.
+    *cached_only* answers from what's stored, or not at all.
     """
     api_key = db.get_setting("lastfm_api_key")
     if not api_key or not name:
@@ -412,9 +459,11 @@ def top_tracks(name, limit=5, max_age=db.FROM_SETTINGS):
     # entries meant two calls about the same artist.
     limit = max(1, min(int(limit or 5), _TRACKS_FETCHED))
     cache_key = f"lftracks:{name.strip().lower()}:{_TRACKS_FETCHED}"
-    cached = db.get_json_cache(cache_key, max_age=db.resolve_max_age(max_age, "hit"))
+    cached = _stored_list(cache_key, db.resolve_max_age(max_age, "hit"))
     if cached is not None:
         return cached[:limit]
+    if cached_only:
+        return []
     data = _lastfm_get({
         "method": "artist.gettoptracks",
         "artist": name,
@@ -422,7 +471,9 @@ def top_tracks(name, limit=5, max_age=db.FROM_SETTINGS):
         "api_key": api_key,
         "format": "json",
         "autocorrect": 1,
-    }) or {}
+    })
+    if data is None:
+        return []  # Last.fm didn't answer: ask again next time
     entries = ((data.get("toptracks") or {}).get("track")) or []
     # One-track artists come back as a bare object rather than a list.
     if isinstance(entries, dict):
@@ -452,7 +503,7 @@ def top_tags(name, limit=5, max_age=db.FROM_SETTINGS):
     if not api_key or not name:
         return []
     cache_key = f"lftags:{name.strip().lower()}"
-    cached = db.get_json_cache(cache_key, max_age=db.resolve_max_age(max_age, "hit"))
+    cached = _stored_list(cache_key, db.resolve_max_age(max_age, "hit"))
     if cached is not None:
         return cached[:limit]
     data = _lastfm_get({
@@ -461,7 +512,9 @@ def top_tags(name, limit=5, max_age=db.FROM_SETTINGS):
         "api_key": api_key,
         "format": "json",
         "autocorrect": 1,
-    }) or {}
+    })
+    if data is None:
+        return []  # Last.fm didn't answer: ask again next time
     tags = ((data.get("toptags") or {}).get("tag")) or []
     out = []
     for tag in tags:
@@ -475,7 +528,10 @@ def top_tags(name, limit=5, max_age=db.FROM_SETTINGS):
 
 
 def _fetch_artist_info(api_key, name):
-    """Uncached artist.getinfo lookup. Returns {} when there's nothing usable."""
+    """Uncached artist.getinfo lookup.
+
+    {} when there's nothing usable, None when Last.fm couldn't answer.
+    """
     data = _lastfm_get(
         {
             "method": "artist.getinfo",
@@ -485,8 +541,8 @@ def _fetch_artist_info(api_key, name):
             "autocorrect": 1,
         }
     )
-    if not data:
-        return {}
+    if data is None:
+        return None
 
     artist = data.get("artist")
     if not artist:

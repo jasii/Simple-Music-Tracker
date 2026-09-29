@@ -14,7 +14,7 @@ import re
 
 from datetime import date, datetime, timedelta, timezone
 
-from ... import db, lastfm, names, preview
+from ... import db, lastfm, names, preview, ratelimit
 from . import DiscoveryPlugin, register
 from .common import cached_scrape, get
 
@@ -45,10 +45,12 @@ def _itunes(kind, artist, title):
     cached = db.get_json_cache(key, max_age=db.cache_max_age("hit"))
     if cached is not None:
         return cached
+    # A scrape runs in the background, so it waits its turn with iTunes (about
+    # twenty searches a minute) rather than giving up on the date.
     data = preview._paced_get(preview.ITUNES_SEARCH, {
         "term": f"{artist} {title}", "media": "music", "limit": 10,
         "entity": "song" if kind == "song" else "album",
-    })
+    }, max_wait=ratelimit.DEFAULT_MAX_WAIT)
     if data is None:
         return {}  # a failed call isn't worth remembering
     field = "trackName" if kind == "song" else "collectionName"

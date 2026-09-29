@@ -20,7 +20,7 @@ import time
 import requests
 from flask import send_file
 
-from . import db, preview
+from . import db, preview, ratelimit
 
 _DIR_NAME = "previews"
 _MIME = {"mp3": "audio/mpeg", "m4a": "audio/mp4"}
@@ -31,9 +31,6 @@ _EXT_BY_TYPE = {
 # A thirty-second sample is about a megabyte and a blog's whole song a few;
 # anything far past that isn't what was asked for.
 _MAX_BYTES = 60 * 1024 * 1024
-# Between downloads: the CDNs aren't the rate-limited search APIs, but a
-# pre-load of a few thousand files needn't arrive all at once.
-_GAP_S = 0.2
 _BROWSER_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
@@ -41,8 +38,6 @@ _BROWSER_UA = (
 # Characters no filesystem the data folder might sit on will take.
 _UNSAFE = re.compile(r'[\x00-\x1f<>:"/\\|?*]+')
 
-_pace_lock = threading.Lock()
-_last_download = [0.0]
 # Keys being fetched right now, so a play and the pre-load don't both fetch.
 _busy = set()
 _busy_lock = threading.Lock()
@@ -211,14 +206,11 @@ def _download(key, url, *, artist, title, album=None, source=None, label=None,
             return False
         _busy.add(key)
     try:
-        with _pace_lock:
-            wait = _last_download[0] + _GAP_S - time.time()
-            if wait > 0:
-                time.sleep(wait)
-            _last_download[0] = time.time()
         try:
-            resp = requests.get(url, stream=True, timeout=(5, 30),
-                                headers={"User-Agent": _BROWSER_UA})
+            # The CDNs have budgets too (app/ratelimit.py): a pre-load of a
+            # few thousand files needn't arrive all at once.
+            resp = ratelimit.get(url, stream=True, timeout=(5, 30), max_wait=60,
+                                 headers={"User-Agent": _BROWSER_UA})
         except requests.RequestException:
             return False
         with resp:

@@ -58,9 +58,7 @@ class LastfmMetadata(MetadataPlugin):
         remix or a one-off single that iTunes and Deezer have never heard of,
         which is exactly what it's for.
         """
-        if cached_only:
-            return None
-        video_id = trackvideo.for_track(artist, title, page_url)
+        video_id = trackvideo.for_track(artist, title, page_url, cached_only=cached_only)
         if not video_id:
             return None
         return {"kind": "youtube", "label": "video", "youtube_id": video_id,

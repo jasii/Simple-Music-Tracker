@@ -16,6 +16,7 @@ import {
 } from "react-icons/lu";
 import { toast } from "sonner";
 import { api } from "../api";
+import { PrewarmNotice } from "../components/PrewarmNotice";
 import { AlbumArt } from "../components/AlbumArt";
 import { ArtistLink, linkArtistNames, useOpenArtist } from "../components/ArtistLink";
 import type {
@@ -615,6 +616,7 @@ export default function Discover() {
 
   return (
     <div>
+      <PrewarmNotice />
       <Tabs value={tab} onValueChange={changeTab}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold">Discover</h1>

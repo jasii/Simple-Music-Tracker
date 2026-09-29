@@ -352,7 +352,7 @@ _HOT_TRACK_LIMIT = 3
 _HOT_TRACK_SHARE = 0.5
 
 
-def _mark_hot_tracks(artist, tracks):
+def _mark_hot_tracks(artist, tracks, cached_only=False):
     """Flag the tracks Last.fm's listeners actually play.
 
     Matched against the artist's top tracks, which are already cached for a
@@ -360,7 +360,7 @@ def _mark_hot_tracks(artist, tracks):
     """
     plays = {
         db.match_key(t["name"]): t["playcount"]
-        for t in lastfm.top_tracks(artist, limit=50)
+        for t in lastfm.top_tracks(artist, limit=50, cached_only=cached_only)
         if t.get("playcount")
     }
     for track in tracks:
@@ -989,6 +989,17 @@ def _track_stream_url(artist, title):
     return "/api/track-stream?" + urlencode({"artist": artist, "title": title})
 
 
+def audio_lookups_paused():
+    """Should a page's request for audio stay off the network right now?
+
+    Yes while the pre-load runs (app/prewarm.py): it's working through the
+    same releases and spending the catalogues' request budgets, so a page
+    plays what's already been found -- your library, saved files, stored
+    previews -- and says "paused" for the rest instead of adding to the load.
+    """
+    return prewarm.running()
+
+
 @app.route("/api/track-source")
 def api_track_source():
     """What to play one track from, without starting to play it.
@@ -1003,9 +1014,14 @@ def api_track_source():
     if not artist or not title:
         return jsonify({"error": "artist and title are required"}), 400
 
-    return jsonify(playable.resolve_one(
-        artist, title, (request.args.get("url") or "").strip() or None
-    ))
+    paused = audio_lookups_paused()
+    found = playable.resolve_one(
+        artist, title, (request.args.get("url") or "").strip() or None,
+        cached_only=paused,
+    )
+    if paused and found.get("kind") == "none":
+        found["paused"] = True
+    return jsonify(found)
 
 
 _HYPEM_ID = re.compile(r"^[0-9a-z]{1,16}$")
@@ -1028,7 +1044,9 @@ def api_hypem_stream(item_id):
         return savedaudio.respond(saved)
     artist = (request.args.get("artist") or "").strip()
     title = (request.args.get("title") or "").strip()
-    if artist and title:
+    # Saved behind the play -- unless the pre-load is running, which saves
+    # these itself and is already using Hype Machine's request budget.
+    if artist and title and not audio_lookups_paused():
         savedaudio.save_async(savedaudio.save_hypem, item_id, artist, title,
                               (request.args.get("album") or "").strip() or None)
     return redirect(f"https://hypem.com/serve/public/{item_id}")
@@ -1047,15 +1065,27 @@ def api_album_playable():
     title = (request.args.get("title") or "").strip()
     if not artist or not title:
         return jsonify({"error": "artist and title are required"}), 400
+    paused = audio_lookups_paused()
     detail = album_detail.get_album_detail(
-        artist, title, mbid=(request.args.get("mbid") or "").strip() or None
+        artist, title, mbid=(request.args.get("mbid") or "").strip() or None,
+        cached_only=paused,
     )
     tracks = [(t.get("name"), t.get("url")) for t in detail.get("tracks") or []]
-    state = playable.status(artist, title, tracks)
+    state = playable.status(artist, title, tracks, build=not paused)
+    if paused and not state["ready"]:
+        # Nothing new is looked up while the pre-load runs: what the caches
+        # already know is filled in, and the page is told why that's all.
+        for name, page_url in tracks:
+            if name and name not in state["tracks"]:
+                state["tracks"][name] = playable.resolve_one(
+                    artist, name, page_url, cached_only=True)
+        state["progress"] = {"done": len(state["tracks"]), "total": len(state["order"])}
+        state["paused"] = True
     if request.args.get("hot") == "1":
         # The tracklist, most played on Last.fm first: what a sampler that
         # plays only a few tracks of each release should start with.
-        marked = _mark_hot_tracks(artist, [{"name": t} for t, _u in tracks if t])
+        marked = _mark_hot_tracks(artist, [{"name": t} for t, _u in tracks if t],
+                                  cached_only=paused)
         state["ranked"] = [t["name"] for t in sorted(
             (t for t in marked if t.get("playcount")),
             key=lambda t: -t["playcount"])]
@@ -1083,23 +1113,27 @@ def api_track_stream():
     saved = savedaudio.find(artist, title)
     if saved:
         return savedaudio.respond(saved)
-    sample = preview.for_track(artist, title)
+    # While the pre-load runs, only what's already been found plays.
+    paused = audio_lookups_paused()
+    sample = preview.for_track(artist, title, cached_only=paused)
     if sample:
-        # Kept behind the play, so the next one comes off the disk.
-        savedaudio.save_async(savedaudio.save, artist, title,
-                              (request.args.get("album") or "").strip() or None)
+        # Kept behind the play, so the next one comes off the disk (the
+        # pre-load saves its own while it runs).
+        if not paused:
+            savedaudio.save_async(savedaudio.save, artist, title,
+                                  (request.args.get("album") or "").strip() or None)
         return redirect(sample)
     # Nothing sells it: play the audio out of the video a source found, so it
     # goes through the same player as everything else (see app/videoaudio.py).
-    found = playable.resolve_one(artist, title)
-    if found.get("youtube_id"):
+    found = playable.resolve_one(artist, title, cached_only=paused)
+    if found.get("youtube_id") and (not paused or videoaudio.on_disk(found["youtube_id"])):
         # Its own proxy rather than the library one: the CDN only serves this
         # in pieces (see app/videoaudio.py).
         streamed = videoaudio.respond(found["youtube_id"],
                                       request.headers.get("Range"))
         if streamed is not None:
             return streamed
-    return jsonify({"error": "no audio for that track"}), 404
+    return jsonify({"error": "no audio for that track", "paused": paused}), 404
 
 
 @app.route("/api/artists/<int:artist_id>/album-links")
@@ -1227,8 +1261,10 @@ def api_artist_top_tracks(artist_id):
         conn.close()
     if row is None:
         return jsonify({"error": "artist not found"}), 404
-    return jsonify({"artist": row["name"],
-                    "tracks": top_tracks_playable(row["name"], _top_tracks_limit())})
+    paused = audio_lookups_paused()
+    return jsonify({"artist": row["name"], "paused": paused,
+                    "tracks": top_tracks_playable(row["name"], _top_tracks_limit(),
+                                                  cached_only=paused)})
 
 
 @app.route("/api/artist-top-tracks")
@@ -1242,8 +1278,10 @@ def api_artist_top_tracks_by_name():
     artist = (request.args.get("artist") or "").strip()
     if not artist:
         return jsonify({"error": "artist is required"}), 400
-    return jsonify({"artist": artist,
-                    "tracks": top_tracks_playable(artist, _top_tracks_limit())})
+    paused = audio_lookups_paused()
+    return jsonify({"artist": artist, "paused": paused,
+                    "tracks": top_tracks_playable(artist, _top_tracks_limit(),
+                                                  cached_only=paused)})
 
 
 def _top_tracks_limit():
@@ -1253,14 +1291,15 @@ def _top_tracks_limit():
         return 5
 
 
-def top_tracks_playable(artist, limit):
+def top_tracks_playable(artist, limit, cached_only=False):
     """An artist's Last.fm top tracks, each with where it plays from.
 
     Names and playcounts come from Last.fm; the sample URLs from the keyless
     catalogues (see app/preview.py). All of it is stored, so this is one round
     of lookups per artist -- which the pre-load job pays ahead of time.
+    *cached_only* answers from what's stored, asking no outside service.
     """
-    tracks = lastfm.top_tracks(artist, limit=limit)
+    tracks = lastfm.top_tracks(artist, limit=limit, cached_only=cached_only)
     # The user's own copy beats a thirty-second sample, so ask the libraries
     # first and only look a sample up for what they haven't got.
     owned = librarytrack.markers(artist, [t["name"] for t in tracks])
@@ -1269,7 +1308,8 @@ def top_tracks_playable(artist, limit):
              for t in tracks if not owned.get(t["name"])}
     samples = preview.for_tracks(
         artist, [t["name"] for t in tracks
-                 if not owned.get(t["name"]) and not saved.get(t["name"])]
+                 if not owned.get(t["name"]) and not saved.get(t["name"])],
+        cached_only=cached_only,
     )
     for track in tracks:
         mark = owned.get(track["name"]) or {}

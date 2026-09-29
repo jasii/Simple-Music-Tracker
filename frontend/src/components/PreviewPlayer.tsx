@@ -18,6 +18,7 @@ import {
 } from "react-icons/lu";
 import { toast } from "sonner";
 import { api, art } from "../api";
+import { explainNoAudio, pausedMessage } from "./PrewarmNotice";
 import { ArtistLink } from "./ArtistLink";
 import { ServiceIcon } from "./ServiceIcon";
 import { Button } from "./ui/button";
@@ -373,6 +374,8 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
           setResolvedNote(r.label ?? null);
           setResolvedNoteUrl(r.source_url ?? null);
           setResolvedNoteIcon(r.icon ?? null);
+        } else if (r.paused) {
+          toast.info(pausedMessage(current.title));
         } else {
           toast.error(`No audio found for ${current.title}.`);
         }
@@ -748,7 +751,7 @@ export function PreviewPlayerProvider({ children }: { children: React.ReactNode 
                 // No library copy and no sample: say so rather than sitting
                 // silently on a track that will never start.
                 setPlaying(false);
-                toast.error(`No audio available for ${current.title}.`);
+                explainNoAudio(current.title, `No audio available for ${current.title}.`);
                 // A list that keeps going shouldn't stall on one dead track.
                 if (hasNext) goNext(false);
               }}
