@@ -1,0 +1,12 @@
+# Read by the conductor and agents. Edit by hand or with repo-new.
+[repo]
+name = "Simple-Music-Tracker"
+forgejo = "projects/Simple-Music-Tracker"
+github = "jasii/Simple-Music-Tracker"
+remote = "both"
+primary = "github"
+created = "2026-11-03"
+
+[deploy]
+enabled = false
+komodo_stack = ""
